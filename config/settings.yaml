@@ -1,0 +1,153 @@
+# ─── Investment Assistant Configuration ───────────────────────────────
+# Edit this file to set your trading parameters and guidelines.
+
+# ─── Global Investment Guidelines ─────────────────────────────────────
+# Budgets are split: DCA (scheduled recurring buys) vs Strategy (dip buys)
+guidelines:
+  trading_enabled: true
+
+  # Budget for scheduled DCA buys (predictable, recurring)
+  dca:
+    max_daily: 500.00
+
+  # Budget for strategy-triggered buys (buy-the-dip)
+  strategy:
+    max_daily: 500.00
+    max_weekly: 2000.00
+    max_monthly: 5000.00
+    max_single_order: 1000.00
+
+# ─── Per-Security Trading Strategies ──────────────────────────────────
+# Each security must have:
+#   mode: "cash_out", "increase_holding", or "hold"
+#
+# HOLD mode params:
+#   stop_loss_pct:      Sell if price drops this % below avg cost (negative number)
+#   sell_quantity_pct:   % of position to sell when triggered (default: 100)
+#
+# CASH_OUT mode params:
+#   take_profit_pct:    Sell when price rises this % from avg cost
+#   trailing_stop_pct:  Optional dynamic trailing stop %
+#   sell_quantity_pct:   % of position to sell when triggered (default: 100)
+#
+# INCREASE_HOLDING mode params:
+#   dca_amount:           Fixed $ amount per DCA buy
+#   dca_interval_days:    Days between DCA buys
+#   buy_dip_pct:          Buy when price drops this % from watermark peak (e.g. -5.0)
+#   min_profit_pct:       Optional — minimum profit % to protect (e.g. 10.0)
+#   profit_trail_pct:     Optional — sell when price drops this % from peak while above min profit (e.g. -5.0)
+#   sell_quantity_pct:    % of position to sell when profit protection triggers (default: 100)
+
+strategies:
+  # ── ETFs ────────────────────────────────────────────────────────────
+  GLD:                              # Gold/Inflation Hedge
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 24.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  RSP:                              # Broad Market (Equal Wt)
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 24.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  # ── Mega-Cap Tech ──────────────────────────────────────────────────
+  GOOGL:
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 24.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  MSFT:
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 0
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  # ── Semiconductors ─────────────────────────────────────────────────
+  NVDA:                             # Tier 1 GPU
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 11.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  AMD:                              # Tier 1 GPU Challenger
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 9.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  MU:                               # Tier 1 Memory (HBM)
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 9.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  ARM:                              # Tier 1 CPU Architecture
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 7.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  AMAT:                             # Tier 2 Equipment
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 5.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50
+
+  LRCX:                             # Tier 2 Equipment
+    mode: increase_holding
+    enabled: true
+    increase_holding:
+      dca_amount: 5.00
+      dca_interval_days: 1
+      buy_dip_pct: -10.0
+      min_profit_pct: 10.0
+      profit_trail_pct: -5.0
+      sell_quantity_pct: 50

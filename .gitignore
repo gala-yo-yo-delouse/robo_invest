@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Runtime state (personal trading data, auto-regenerated)
+config/spending_ledger.json
+config/watermarks.json
+spending_ledger.json
+watermarks.json
+
+# Logs
+logs/
+
+# Local Claude Code settings
+.claude/settings.local.json
