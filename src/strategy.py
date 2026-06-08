@@ -82,8 +82,12 @@ class StrategyEngine:
             elif strategy.mode == StrategyMode.HOLD:
                 self._evaluate_hold(symbol, holding, strategy, current_price)
 
-        # Sort by priority (highest first)
-        self.signals.sort(key=lambda s: s.priority, reverse=True)
+        # Sort by priority (highest first), then by the configured symbol order
+        # (earlier in settings = higher priority). Budget is already reserved in
+        # this same symbol order during generation (see _check_guidelines), so a
+        # symbol listed first wins ties and gets funded first when budget is tight.
+        order = {sym: i for i, sym in enumerate(self.strategies.keys())}
+        self.signals.sort(key=lambda s: (-s.priority, order.get(s.symbol, 10**9)))
         return self.signals
 
     def _get_price(self, symbol: str, holding: Optional[Holding]) -> float:

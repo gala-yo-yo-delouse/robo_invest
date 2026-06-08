@@ -168,6 +168,8 @@ function StrategiesView() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [newSym, setNewSym] = useState('');
+  const [newMode, setNewMode] = useState<string>('increase_holding');
 
   useEffect(() => { if (data) setDraft(structuredClone(data)); }, [data]);
   if (!draft) return <Loader error={error} loading={loading} />;
@@ -197,6 +199,34 @@ function StrategiesView() {
     // Seed the new mode's param block with defaults if it doesn't exist yet
     // (a previously-used mode's block is preserved, so toggling back keeps values).
     if (!s[mode]) s[mode] = { ...MODE_DEFAULTS[mode] };
+    setDraft(next);
+  };
+  // Reordering rewrites the strategies object key order; that order is the
+  // priority/budget order the engine uses (earlier = funded first).
+  const moveSymbol = (sym: string, dir: 'up' | 'down') => {
+    const entries = Object.entries(draft.strategies as Record<string, any>);
+    const i = entries.findIndex(([k]) => k === sym);
+    const j = dir === 'up' ? i - 1 : i + 1;
+    if (j < 0 || j >= entries.length) return;
+    [entries[i], entries[j]] = [entries[j], entries[i]];
+    setDraft({ ...draft, strategies: Object.fromEntries(entries) });
+  };
+  const addSymbol = () => {
+    const sym = newSym.trim().toUpperCase();
+    if (!sym) return;
+    if ((draft.strategies as Record<string, any>)[sym]) {
+      setMsg(`⚠️ ${sym} already exists`);
+      return;
+    }
+    const next = structuredClone(draft);
+    next.strategies[sym] = { mode: newMode, enabled: true, [newMode]: { ...MODE_DEFAULTS[newMode] } };
+    setDraft(next);
+    setNewSym('');
+    setMsg(null);
+  };
+  const removeSymbol = (sym: string) => {
+    const next = structuredClone(draft);
+    delete next.strategies[sym];
     setDraft(next);
   };
 
@@ -250,12 +280,29 @@ function StrategiesView() {
       </table>
 
       <h3>Per-Security Strategies</h3>
-      {Object.entries(draft.strategies as Record<string, any>).map(([sym, s]) => {
+      <p className="muted small">
+        Order = priority. When budget is tight, symbols higher in this list are funded first.
+        Use ▲▼ to reorder.
+      </p>
+      <div className="addsym">
+        <input
+          placeholder="Ticker (e.g. TSLA)"
+          value={newSym}
+          onChange={(e) => setNewSym(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') addSymbol(); }}
+        />
+        <select value={newMode} onChange={(e) => setNewMode(e.target.value)}>
+          {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <button onClick={addSymbol}>+ Add symbol</button>
+      </div>
+      {Object.entries(draft.strategies as Record<string, any>).map(([sym, s], idx, arr) => {
         const modeKey = s.mode as string; // 'increase_holding' | 'cash_out' | 'hold'
         const params = s[modeKey] ?? {};
         return (
           <div className="strat" key={sym}>
             <div className="strat-head">
+              <span className="rank">{idx + 1}</span>
               <strong>{sym}</strong>
               <select
                 className="mode-select"
@@ -269,6 +316,11 @@ function StrategiesView() {
                 <input type="checkbox" checked={!!s.enabled} onChange={(e) => setEnabled(sym, e.target.checked)} />
                 enabled
               </label>
+              <span className="reorder">
+                <button onClick={() => moveSymbol(sym, 'up')} disabled={idx === 0} title="Move up (higher priority)">▲</button>
+                <button onClick={() => moveSymbol(sym, 'down')} disabled={idx === arr.length - 1} title="Move down">▼</button>
+                <button onClick={() => removeSymbol(sym)} className="remove" title="Remove symbol">✕</button>
+              </span>
             </div>
             <div className="params">
               {Object.keys(params).map((k) => (

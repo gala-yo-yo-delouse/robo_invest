@@ -28,8 +28,10 @@ fi
 # Find or create the Amplify Hosting app for this env.
 APP_ID="${APP_ID:-$(aws amplify list-apps --query "apps[?name=='$APP_NAME'].appId | [0]" --output text)}"
 if [ "$APP_ID" = "None" ] || [ -z "$APP_ID" ]; then
+  # SPA rewrite that excludes real asset files (a blanket /<*> rule would
+  # serve index.html for .js/.css too, white-screening the app).
   APP_ID=$(aws amplify create-app --name "$APP_NAME" \
-    --custom-rules '[{"source":"/<*>","target":"/index.html","status":"200"}]' \
+    --custom-rules '[{"source":"</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webmanifest)$)([^.]+$)/>","target":"/index.html","status":"200"}]' \
     --query 'app.appId' --output text)
   aws amplify create-branch --app-id "$APP_ID" --branch-name main >/dev/null
   echo "Created Amplify app $APP_NAME ($APP_ID)"
