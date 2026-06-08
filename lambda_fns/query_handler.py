@@ -14,6 +14,7 @@ Fields:
   saveSettings  -> validate + persist config (arguments.settings)
 """
 
+import json
 import logging
 
 from src.alpaca_client import AlpacaClient
@@ -140,7 +141,10 @@ def _get_status() -> dict:
     }
 
 
-def _save_settings(settings: dict) -> dict:
+def _save_settings(settings) -> dict:
+    # AppSync delivers AWSJSON arguments as a JSON string.
+    if isinstance(settings, str):
+        settings = json.loads(settings)
     if not isinstance(settings, dict) or "strategies" not in settings:
         raise ValueError("settings must be an object with a 'strategies' key")
     # Validate by building the dataclass tree — raises on a bad shape/mode.
@@ -153,10 +157,15 @@ def _save_settings(settings: dict) -> dict:
 # ── router ────────────────────────────────────────────────────────────
 
 def handler(event, context):
-    field = (event.get("info", {}).get("fieldName")
+    # Field name location varies by caller:
+    #   Amplify/AppSync function resolver → top-level event["fieldName"]
+    #   AppSync direct Lambda resolver     → event["info"]["fieldName"]
+    #   direct invoke / tests              → event["action"]
+    field = (event.get("fieldName")
+             or event.get("info", {}).get("fieldName")
              or event.get("action"))
-    args = event.get("arguments", event) or {}
-    logging.info("query_handler field=%s", field)
+    args = event.get("arguments") or {}
+    logging.info("query_handler field=%s keys=%s", field, list(event.keys()))
 
     # Settings/status read from DynamoDB only — no Alpaca connection needed,
     # so they work even before the Alpaca secret is populated.

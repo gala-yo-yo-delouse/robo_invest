@@ -138,6 +138,31 @@ function ProfilesView() {
 }
 
 // ── Strategies / Settings editor (read + write) ──────────────────────────
+const MODES = ['increase_holding', 'cash_out', 'hold'] as const;
+
+// Default param block when a security is switched to a given mode.
+const MODE_DEFAULTS: Record<string, Record<string, number | null>> = {
+  increase_holding: {
+    dca_amount: 0, dca_interval_days: 7, buy_dip_pct: -10,
+    min_profit_pct: 10, profit_trail_pct: -5, sell_quantity_pct: 100,
+  },
+  cash_out: { take_profit_pct: 25, trailing_stop_pct: null, sell_quantity_pct: 100 },
+  hold: { stop_loss_pct: -15, sell_quantity_pct: 100 },
+};
+
+// Hover help per parameter (from settings.yaml docs).
+const PARAM_HELP: Record<string, string> = {
+  dca_amount: 'Fixed $ amount per scheduled DCA buy (0 = DCA off)',
+  dca_interval_days: 'Days between DCA buys',
+  buy_dip_pct: 'Buy when price drops this % from the watermark peak (e.g. -10)',
+  min_profit_pct: 'Optional — minimum profit % to protect before a profit-trail sell',
+  profit_trail_pct: 'Optional — sell when price drops this % from peak while above min profit',
+  sell_quantity_pct: '% of position to sell when triggered (default 100)',
+  take_profit_pct: 'Sell when price rises this % above average cost',
+  trailing_stop_pct: 'Optional dynamic trailing stop %',
+  stop_loss_pct: 'Sell if price drops this % below average cost (negative)',
+};
+
 function StrategiesView() {
   const { data, error, loading, reload } = useAsync<Settings>(api.getSettings);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -163,6 +188,15 @@ function StrategiesView() {
   const setEnabled = (sym: string, val: boolean) => {
     const next = structuredClone(draft);
     next.strategies[sym].enabled = val;
+    setDraft(next);
+  };
+  const setMode = (sym: string, mode: string) => {
+    const next = structuredClone(draft);
+    const s = next.strategies[sym];
+    s.mode = mode;
+    // Seed the new mode's param block with defaults if it doesn't exist yet
+    // (a previously-used mode's block is preserved, so toggling back keeps values).
+    if (!s[mode]) s[mode] = { ...MODE_DEFAULTS[mode] };
     setDraft(next);
   };
 
@@ -223,7 +257,14 @@ function StrategiesView() {
           <div className="strat" key={sym}>
             <div className="strat-head">
               <strong>{sym}</strong>
-              <span className="badge">{modeKey}</span>
+              <select
+                className="mode-select"
+                value={modeKey}
+                onChange={(e) => setMode(sym, e.target.value)}
+                title="Strategy type — switching swaps in that mode's parameters"
+              >
+                {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
               <label className="toggle">
                 <input type="checkbox" checked={!!s.enabled} onChange={(e) => setEnabled(sym, e.target.checked)} />
                 enabled
@@ -231,8 +272,8 @@ function StrategiesView() {
             </div>
             <div className="params">
               {Object.keys(params).map((k) => (
-                <label key={k} className="param">
-                  <span>{k}</span>
+                <label key={k} className="param" title={PARAM_HELP[k] ?? ''}>
+                  <span>{k} {PARAM_HELP[k] ? <span className="help">ⓘ</span> : null}</span>
                   {numInput(params[k], (v) => setParam(sym, modeKey, k, v))}
                 </label>
               ))}

@@ -85,7 +85,30 @@ repo to **Amplify Hosting** (appRoot `web/`) — the same backend serves it.
   per-symbol param in **Strategies → Save**, then confirm the next trading
   cycle reflects it (settings reload every cycle).
 
-## Switch to live (later)
+## Environments (dev / prod)
+
+Two **fully isolated** stacks, selected by `ROBOTRADE_ENV` at deploy time. They
+share nothing — separate DynamoDB tables, Lambdas, Cognito pools, AppSync APIs,
+dashboards, and Alpaca secrets.
+
+| | **dev** | **prod** |
+|---|---|---|
+| Alpaca | paper (`robotrade/alpaca-paper`) | live (`robotrade/alpaca-live`) |
+| Resource names | `robotrade-*` (legacy) | `robotrade-prod-*` |
+| Schedule | enabled | **disabled** until you turn it on |
+| Backend deploy | `npm run deploy:dev` | `npm run deploy:prod` |
+| Dashboard deploy | `npm run host:dev` | `npm run host:prod` |
+
+Workflow: develop + validate on **dev/paper**; deploy the *same code* to
+**prod/live** with `npm run deploy:prod`. Each backend deploy writes
+`web/amplify_outputs.<env>.json`; the matching `host:<env>` builds the dashboard
+against it as a separate Amplify Hosting app.
+
+Per-env setup (once): seed settings into that env's table
+(`STATE_TABLE=robotrade-prod-state … scripts/seed_settings.py`) and create its
+Cognito admin user.
+
+## Go live (turn on prod)
 
 1. Put real keys in the live secret:
    ```bash
@@ -93,13 +116,12 @@ repo to **Amplify Hosting** (appRoot `web/`) — the same backend serves it.
      --secret-id robotrade/alpaca-live \
      --secret-string '{"ALPACA_API_KEY":"<live>","ALPACA_SECRET_KEY":"<live>","ALPACA_BASE_URL":"https://api.alpaca.markets"}'
    ```
-2. Flip the selector — set `const ALPACA_ENV = 'live'` in `amplify/backend.ts`
-   and `npm run deploy`. (Quick, no-redeploy alternative: override the env var on
-   both functions with `aws lambda update-function-configuration --function-name
-   robotrade-{trading,query} --environment "Variables={...,ALPACA_ENV=live}"` —
-   but you must pass the full Variables map, so editing backend.ts is safer.)
-
-Secret values are never touched when switching — only the `ALPACA_ENV` pointer.
+2. Enable the prod schedule (it ships disabled):
+   ```bash
+   aws events enable-rule --name robotrade-prod-trading-schedule \
+     --profile robotrade-admin --region us-east-1
+   ```
+   Disable again any time with `aws events disable-rule --name robotrade-prod-trading-schedule …`.
 
 ## Tear down
 

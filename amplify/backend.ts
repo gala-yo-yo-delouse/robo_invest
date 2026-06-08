@@ -21,9 +21,19 @@ backend.auth.resources.cfnResources.cfnUserPool.adminCreateUserConfig = {
 // ── Compute/state stack (the serverless trading stack) ──────────────────────
 const stack = backend.createStack('RobotradeCompute');
 
+// Environment selector (set ROBOTRADE_ENV at deploy time; default dev).
+//   dev  → paper account, legacy unsuffixed names (so the dev stack is
+//          untouched by this change), schedule enabled.
+//   prod → live account, -prod- names for full isolation, schedule starts
+//          DISABLED so it places no real orders until explicitly enabled.
+const ENV = process.env.ROBOTRADE_ENV ?? 'dev';
+const SFX = ENV === 'dev' ? '' : `-${ENV}`;
+const ALPACA_ENV = ENV === 'prod' ? 'live' : 'paper';
+const SCHEDULE_ENABLED = ENV !== 'prod';
+
 // Single-table state store: watermarks / ledger / config, one item each.
 const stateTable = new dynamodb.Table(stack, 'StateTable', {
-  tableName: 'robotrade-state',
+  tableName: `robotrade${SFX}-state`,
   partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
   billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
   removalPolicy: RemovalPolicy.RETAIN, // never drop trading state on teardown
@@ -35,8 +45,8 @@ const stateTable = new dynamodb.Table(stack, 'StateTable', {
 // The Lambdas pick one via ALPACA_ENV below — flip paper↔live without touching
 // secret values. The secrets are NOT managed by CDK (so they survive
 // teardown and the user edits them in the console); we only grant read access
-// to the namespace.
-const ALPACA_ENV = 'paper';
+// to the namespace. dev reads robotrade/alpaca-paper, prod robotrade/alpaca-live
+// (selected by ALPACA_ENV, derived from ENV above).
 
 // Prebuilt, Docker-free deployment package (scripts/build_lambda.sh).
 const code = lambda.Code.fromAsset(
@@ -60,7 +70,7 @@ const sharedProps = {
 // Trading Lambda — one evaluate+execute cycle, fired by EventBridge.
 const tradingFn = new lambda.Function(stack, 'TradingFn', {
   ...sharedProps,
-  functionName: 'robotrade-trading',
+  functionName: `robotrade${SFX}-trading`,
   handler: 'trading_handler.handler',
   timeout: Duration.minutes(2),
 });
@@ -68,7 +78,7 @@ const tradingFn = new lambda.Function(stack, 'TradingFn', {
 // Query Lambda — frontend reads/writes, referenced by name from data/resource.ts.
 const queryFn = new lambda.Function(stack, 'QueryFn', {
   ...sharedProps,
-  functionName: 'robotrade-query',
+  functionName: `robotrade${SFX}-query`,
   handler: 'query_handler.handler',
   timeout: Duration.minutes(1),
 });
@@ -99,7 +109,8 @@ backend.data.resources.graphqlApi.node.addDependency(queryFn);
 // market hours across DST; the handler re-checks Alpaca's clock and no-ops
 // when the market is actually closed (holidays, early closes). ──
 new events.Rule(stack, 'TradingSchedule', {
-  ruleName: 'robotrade-trading-schedule',
+  ruleName: `robotrade${SFX}-trading-schedule`,
+  enabled: SCHEDULE_ENABLED, // prod starts disabled
   schedule: events.Schedule.expression('cron(0/5 13-21 ? * MON-FRI *)'),
   targets: [new targets.LambdaFunction(tradingFn)],
 });

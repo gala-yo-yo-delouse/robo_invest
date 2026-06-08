@@ -5,9 +5,11 @@
   "main": "index.js",
   "scripts": {
     "build:lambda": "bash scripts/build_lambda.sh",
-    "deploy": "bash scripts/build_lambda.sh && ampx sandbox --profile robotrade-admin --outputs-out-dir web --once",
-    "deploy:watch": "bash scripts/build_lambda.sh && ampx sandbox --profile robotrade-admin --outputs-out-dir web",
-    "deploy:delete": "ampx sandbox delete --profile robotrade-admin"
+    "deploy:dev": "bash scripts/build_lambda.sh && ROBOTRADE_ENV=dev ampx sandbox --profile robotrade-admin --outputs-out-dir web --once && cp web/amplify_outputs.json web/amplify_outputs.dev.json",
+    "deploy:prod": "bash scripts/build_lambda.sh && ROBOTRADE_ENV=prod ampx sandbox --identifier prod --profile robotrade-admin --outputs-out-dir web --once && cp web/amplify_outputs.json web/amplify_outputs.prod.json && cp web/amplify_outputs.dev.json web/amplify_outputs.json",
+    "host:dev": "bash scripts/deploy_frontend.sh dev",
+    "host:prod": "bash scripts/deploy_frontend.sh prod",
+    "deploy:delete:prod": "ampx sandbox delete --identifier prod --profile robotrade-admin"
   },
   "repository": {
     "type": "git",
@@ -24,6 +26,7 @@
   "devDependencies": {
     "@aws-amplify/backend": "^1.23.0",
     "@aws-amplify/backend-cli": "^1.8.3",
+    "@types/node": "^25.9.2",
     "aws-cdk-lib": "^2.244.0",
     "constructs": "^10.6.0",
     "esbuild": "^0.28.0",
