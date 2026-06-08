@@ -20,13 +20,15 @@ Secrets Manager: robotrade/alpaca   (ALPACA_API_KEY / SECRET / BASE_URL)
 ## 1. Deploy the backend
 
 ```bash
-# builds the Docker-free Lambda zip, then provisions everything via CDK
-npm run deploy            # one-shot   (ampx sandbox --once)
-# or: npm run deploy:watch  to stay attached and hot-reload on backend edits
+# builds the Docker-free Lambda zip, then provisions the stack via CDK
+npm run deploy:dev        # dev/paper stack
+# npm run deploy:prod     # prod/live stack (-prod- names, schedule starts disabled)
 ```
 
-First run also bootstraps CDK in the account. On success, `web/amplify_outputs.json`
-is (over)written with the real Cognito/AppSync config.
+First run also bootstraps CDK in the account
+(`npx cdk bootstrap aws://<account>/us-east-1 --profile robotrade-admin`).
+Each deploy writes `web/amplify_outputs.<env>.json` with the real
+Cognito/AppSync config (and `host:<env>` builds the dashboard against it).
 
 ## 2. Set the Alpaca credentials
 
@@ -126,9 +128,10 @@ Cognito admin user.
 ## Tear down
 
 ```bash
-npm run deploy:delete      # removes the sandbox stack
+npm run deploy:delete:prod                              # removes the prod stack
+ampx sandbox delete --profile robotrade-admin           # removes the dev stack
 ```
 
-`robotrade-state` (DynamoDB) has `RemovalPolicy.RETAIN` — it survives teardown
+`robotrade[-env]-state` (DynamoDB) has `RemovalPolicy.RETAIN` — it survives teardown
 so trading history/watermarks aren't lost. Delete it manually if you really want
 it gone.
