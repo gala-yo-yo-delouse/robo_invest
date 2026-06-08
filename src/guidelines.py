@@ -1,28 +1,19 @@
 """Investment guidelines engine — enforces spending limits and rules."""
 
-import json
 from datetime import datetime, date, timedelta
-from pathlib import Path
 
 from .models import BuyType, InvestmentGuidelines
-
-
-LEDGER_FILE = Path(__file__).parent.parent / "config" / "spending_ledger.json"
+from .storage import get_backend
 
 
 def _load_ledger() -> dict:
-    """Load the spending ledger from disk."""
-    if LEDGER_FILE.exists():
-        with open(LEDGER_FILE, "r") as f:
-            return json.load(f)
-    return {"entries": [], "last_reset": {}}
+    """Load the spending ledger from the active storage backend."""
+    return get_backend().load_ledger()
 
 
 def _save_ledger(ledger: dict):
-    """Save the spending ledger to disk."""
-    LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(LEDGER_FILE, "w") as f:
-        json.dump(ledger, f, indent=2, default=str)
+    """Persist the spending ledger to the active storage backend."""
+    get_backend().save_ledger(ledger)
 
 
 def load_guidelines_with_spending(guidelines: InvestmentGuidelines) -> InvestmentGuidelines:

@@ -21,3 +21,12 @@ logs/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# amplify
+node_modules
+.amplify
+amplify_outputs*
+amplifyconfiguration*
+
+# TS incremental build cache
+*.tsbuildinfo

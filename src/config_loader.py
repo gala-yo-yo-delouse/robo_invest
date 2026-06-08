@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import yaml
-
 from .models import (
     CashOutParams,
     HoldParams,
@@ -13,19 +11,20 @@ from .models import (
     StrategyMode,
     TradingStrategy,
 )
+from .storage import get_backend
 
 
 DEFAULT_CONFIG = Path(__file__).parent.parent / "config" / "settings.yaml"
 
 
 def load_config(config_path: str | Path = DEFAULT_CONFIG) -> dict:
-    """Load and parse the YAML configuration file."""
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+    """Load the configuration via the active storage backend.
 
-    with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+    Local backend reads config/settings.yaml; DynamoDB backend reads the
+    settings item. The config_path argument is kept for call-site
+    compatibility but is only honoured by the local file backend.
+    """
+    return get_backend().load_settings(config_path)
 
 
 def _build_budget(cfg: dict, defaults: dict) -> SpendingBudget:

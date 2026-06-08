@@ -3,25 +3,28 @@
 import os
 import urllib.request
 import urllib.parse
-import json
 from datetime import datetime
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-
 
 def _send(text: str):
-    """Send a message via Telegram Bot API."""
-    if not BOT_TOKEN or not CHAT_ID:
+    """Send a message via Telegram Bot API.
+
+    Credentials are read at call time (not import time) so that values loaded
+    into the environment after import — e.g. from Secrets Manager in Lambda —
+    are picked up.
+    """
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not bot_token or not chat_id:
         return
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         data = urllib.parse.urlencode({
-            "chat_id": CHAT_ID,
+            "chat_id": chat_id,
             "text": text,
             "parse_mode": "HTML",
         }).encode()
@@ -56,6 +59,14 @@ def notify_order(side: str, symbol: str, qty: float, value: float, reason: str, 
 
 def notify_error(message: str):
     _send(f"⚠️ <b>Error</b>\n{message}")
+
+
+def notify_test():
+    _send(
+        f"✅ <b>Cloud wiring test</b>\n"
+        f"Telegram notifications are live from the serverless stack.\n"
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    )
 
 
 def notify_summary(total_orders: int, total_value: float):

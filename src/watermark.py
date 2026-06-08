@@ -4,25 +4,17 @@ Used by the trailing stop logic to know the highest price reached
 since tracking began, so the stop can trail the peak downward.
 """
 
-import json
 from datetime import datetime
-from pathlib import Path
 
-
-WATERMARK_FILE = Path(__file__).parent.parent / "config" / "watermarks.json"
+from .storage import get_backend
 
 
 def _load_watermarks() -> dict:
-    if WATERMARK_FILE.exists():
-        with open(WATERMARK_FILE, "r") as f:
-            return json.load(f)
-    return {}
+    return get_backend().load_watermarks()
 
 
 def _save_watermarks(data: dict):
-    WATERMARK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(WATERMARK_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    get_backend().save_watermarks(data)
 
 
 def get_high_watermark(symbol: str) -> float:

@@ -85,59 +85,8 @@ def run(config_path: Path, interval_minutes: int = 5):
                     time.sleep(min(wait_seconds + 10, 60))
                 continue
 
-            print(f"  [{_now()}] Evaluating signals...")
+            run_one_cycle(client, config_path)
 
-            # Build live portfolio from Alpaca positions
-            portfolio = client.build_portfolio()
-            print(f"  Portfolio: ${portfolio.total_value:,.2f} "
-                  f"({len(portfolio.holdings)} positions, "
-                  f"${portfolio.cash_balance:,.2f} cash)")
-
-            # Reload config each cycle (picks up settings.yaml edits without restart)
-            config = load_config(config_path)
-            guidelines = build_guidelines(config)
-            strategies = build_strategies(config)
-
-            # DCA timing and dedup
-            last_dca = get_last_dca_dates()
-            today_executed = get_today_executed()
-
-            # Evaluate
-            engine = StrategyEngine(
-                portfolio, strategies, guidelines,
-                price_fetcher=client.get_current_price,
-                last_dca_dates=last_dca,
-            )
-            signals = engine.evaluate_all()
-
-            # Filter out signals already executed today
-            new_signals = []
-            for s in signals:
-                key = (s.symbol, s.side.value, s.buy_type.value)
-                if key not in today_executed:
-                    new_signals.append(s)
-                else:
-                    print(f"    (skip) {s.symbol} {s.side.value} [{s.buy_type.value}] — already executed today")
-
-            if not new_signals:
-                print(f"  No new signals.")
-                logging.info("No new signals (portfolio=$%.2f, %d positions)",
-                             portfolio.total_value, len(portfolio.holdings))
-            else:
-                print(f"  Executing {len(new_signals)} signal(s):")
-                logging.info("Executing %d signal(s)", len(new_signals))
-                total_executed = 0
-                total_value = 0.0
-                for signal in new_signals:
-                    ok = _execute_signal(client, signal)
-                    if ok:
-                        total_executed += 1
-                        total_value += signal.estimated_value
-                if total_executed > 0:
-                    logging.info("Executed %d orders, total=$%.2f", total_executed, total_value)
-                    notify_summary(total_executed, total_value)
-
-            next_eval = datetime.now().strftime("%H:%M:%S")
             print(f"  Next eval at ~{_add_minutes(interval_minutes)}.\n")
             time.sleep(interval_minutes * 60)
 
@@ -152,6 +101,76 @@ def run(config_path: Path, interval_minutes: int = 5):
             logging.exception("Cycle error: %s", e)
             notify_error(str(e))
             time.sleep(interval_minutes * 60)
+
+
+def run_one_cycle(client: AlpacaClient, config_path: Path) -> dict:
+    """Evaluate strategies once and execute any new signals.
+
+    This is the unit of work shared by continuous mode (called in a loop) and
+    the EventBridge-triggered Lambda (called once per invocation). Assumes the
+    market is open — the caller is responsible for the clock check. Returns a
+    summary dict for logging / the Lambda response.
+    """
+    print(f"  [{_now()}] Evaluating signals...")
+
+    # Build live portfolio from Alpaca positions
+    portfolio = client.build_portfolio()
+    print(f"  Portfolio: ${portfolio.total_value:,.2f} "
+          f"({len(portfolio.holdings)} positions, "
+          f"${portfolio.cash_balance:,.2f} cash)")
+
+    # Reload config each cycle (picks up settings edits without restart)
+    config = load_config(config_path)
+    guidelines = build_guidelines(config)
+    strategies = build_strategies(config)
+
+    # DCA timing and dedup
+    last_dca = get_last_dca_dates()
+    today_executed = get_today_executed()
+
+    # Evaluate
+    engine = StrategyEngine(
+        portfolio, strategies, guidelines,
+        price_fetcher=client.get_current_price,
+        last_dca_dates=last_dca,
+    )
+    signals = engine.evaluate_all()
+
+    # Filter out signals already executed today
+    new_signals = []
+    for s in signals:
+        key = (s.symbol, s.side.value, s.buy_type.value)
+        if key not in today_executed:
+            new_signals.append(s)
+        else:
+            print(f"    (skip) {s.symbol} {s.side.value} [{s.buy_type.value}] — already executed today")
+
+    total_executed = 0
+    total_value = 0.0
+    if not new_signals:
+        print(f"  No new signals.")
+        logging.info("No new signals (portfolio=$%.2f, %d positions)",
+                     portfolio.total_value, len(portfolio.holdings))
+    else:
+        print(f"  Executing {len(new_signals)} signal(s):")
+        logging.info("Executing %d signal(s)", len(new_signals))
+        for signal in new_signals:
+            ok = _execute_signal(client, signal)
+            if ok:
+                total_executed += 1
+                total_value += signal.estimated_value
+        if total_executed > 0:
+            logging.info("Executed %d orders, total=$%.2f", total_executed, total_value)
+            notify_summary(total_executed, total_value)
+
+    return {
+        "portfolio_value": portfolio.total_value,
+        "positions": len(portfolio.holdings),
+        "signals_evaluated": len(signals),
+        "signals_new": len(new_signals),
+        "executed": total_executed,
+        "executed_value": round(total_value, 2),
+    }
 
 
 def _execute_signal(client: AlpacaClient, signal) -> bool:

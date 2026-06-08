@@ -1,0 +1,36 @@
+{
+  "name": "investment_assistant",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build:lambda": "bash scripts/build_lambda.sh",
+    "deploy": "bash scripts/build_lambda.sh && ampx sandbox --profile robotrade-admin --outputs-out-dir web --once",
+    "deploy:watch": "bash scripts/build_lambda.sh && ampx sandbox --profile robotrade-admin --outputs-out-dir web",
+    "deploy:delete": "ampx sandbox delete --profile robotrade-admin"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gala-yo-yo-delouse/robo_invest.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/gala-yo-yo-delouse/robo_invest/issues"
+  },
+  "homepage": "https://github.com/gala-yo-yo-delouse/robo_invest#readme",
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.23.0",
+    "@aws-amplify/backend-cli": "^1.8.3",
+    "aws-cdk-lib": "^2.244.0",
+    "constructs": "^10.6.0",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "aws-amplify": "^6.17.0"
+  }
+}

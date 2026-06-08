@@ -1,0 +1,313 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  api,
+  type Portfolio,
+  type Profile,
+  type Settings,
+  type Signal,
+  type Status,
+} from './api';
+
+const TABS = ['Portfolio', 'Signals', 'Profiles', 'Strategies'] as const;
+type Tab = (typeof TABS)[number];
+
+const usd = (n: number) =>
+  n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+const pct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+
+// Small async-data hook with loading/error states.
+function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const run = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fn()
+      .then(setData)
+      .catch((e) => setError(String(e?.message ?? e)))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  useEffect(run, [run]);
+  return { data, error, loading, reload: run };
+}
+
+function Loader({ error, loading }: { error: string | null; loading: boolean }) {
+  if (loading) return <p className="muted">Loading live data from Alpaca…</p>;
+  if (error) return <p className="error">⚠️ {error}</p>;
+  return null;
+}
+
+// ── Portfolio ────────────────────────────────────────────────────────────
+function PortfolioView() {
+  const { data, error, loading } = useAsync<Portfolio>(api.portfolio);
+  if (!data) return <Loader error={error} loading={loading} />;
+  return (
+    <>
+      <div className="cards">
+        <Card label="Total" value={usd(data.totalValue)} />
+        <Card label="Invested" value={usd(data.investedValue)} />
+        <Card label="Cash" value={usd(data.cashBalance)} sub={`${data.cashPct.toFixed(1)}%`} />
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th><th>Shares</th><th>Price</th><th>Value</th>
+            <th>Cost Basis</th><th>Gain/Loss</th><th>%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.holdings.map((h) => (
+            <tr key={h.symbol}>
+              <td>{h.symbol}</td>
+              <td>{h.quantity.toFixed(2)}</td>
+              <td>{usd(h.lastPrice)}</td>
+              <td>{usd(h.currentValue)}</td>
+              <td>{usd(h.costBasisTotal)}</td>
+              <td className={h.gainLossDollar >= 0 ? 'pos' : 'neg'}>{usd(h.gainLossDollar)}</td>
+              <td className={h.gainLossPercent >= 0 ? 'pos' : 'neg'}>{pct(h.gainLossPercent)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+// ── Signals ──────────────────────────────────────────────────────────────
+function SignalsView() {
+  const { data, error, loading } = useAsync<Signal[]>(api.signals);
+  if (!data) return <Loader error={error} loading={loading} />;
+  if (data.length === 0) return <p className="muted">No trade signals — all positions within bounds.</p>;
+  const group = (pred: (s: Signal) => boolean) => data.filter(pred);
+  const sections: [string, Signal[]][] = [
+    ['🔴 Sells', group((s) => s.side === 'sell')],
+    ['🟡 Strategy Buys (dip)', group((s) => s.side === 'buy' && s.buyType === 'strategy')],
+    ['🟢 DCA Buys', group((s) => s.side === 'buy' && s.buyType === 'dca')],
+  ];
+  return (
+    <>
+      {sections.filter(([, rows]) => rows.length > 0).map(([title, rows]) => (
+        <div key={title}>
+          <h3>{title}</h3>
+          <table>
+            <thead><tr><th>Symbol</th><th>Qty</th><th>Est. Value</th><th>Reason</th><th>Priority</th></tr></thead>
+            <tbody>
+              {rows.map((s, i) => (
+                <tr key={i}>
+                  <td>{s.symbol}</td>
+                  <td>{s.quantity.toFixed(4)}</td>
+                  <td>{usd(s.estimatedValue)}</td>
+                  <td>{s.reason}</td>
+                  <td>{s.priority}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ── Profiles ─────────────────────────────────────────────────────────────
+function ProfilesView() {
+  const { data, error, loading } = useAsync<Profile[]>(api.profiles);
+  if (!data) return <Loader error={error} loading={loading} />;
+  return (
+    <div className="cards">
+      {data.map((p) => {
+        const plPct = p.avgCost > 0 ? ((p.livePrice - p.avgCost) / p.avgCost) * 100 : 0;
+        return (
+          <div className="profile" key={p.symbol}>
+            <div className="profile-head">
+              <strong>{p.symbol}</strong>
+              <span className={plPct >= 0 ? 'pos' : 'neg'}>{pct(plPct)}</span>
+            </div>
+            <div className="muted small">{p.description}</div>
+            <div className="kv"><span>Live</span><span>{usd(p.livePrice)}</span></div>
+            <div className="kv"><span>Avg cost</span><span>{usd(p.avgCost)}</span></div>
+            <div className="kv"><span>Shares</span><span>{p.quantity.toFixed(2)}</span></div>
+            <div className="kv"><span>Bars (90d)</span><span>{p.bars.length}</span></div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Strategies / Settings editor (read + write) ──────────────────────────
+function StrategiesView() {
+  const { data, error, loading, reload } = useAsync<Settings>(api.getSettings);
+  const [draft, setDraft] = useState<Settings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { if (data) setDraft(structuredClone(data)); }, [data]);
+  if (!draft) return <Loader error={error} loading={loading} />;
+
+  const g = draft.guidelines ?? {};
+  const setGuideline = (path: string[], val: any) => {
+    const next = structuredClone(draft);
+    let o = next.guidelines ?? (next.guidelines = {});
+    for (let i = 0; i < path.length - 1; i++) o = o[path[i]] ?? (o[path[i]] = {});
+    o[path[path.length - 1]] = val;
+    setDraft(next);
+  };
+  const setParam = (sym: string, modeKey: string, key: string, val: any) => {
+    const next = structuredClone(draft);
+    next.strategies[sym][modeKey][key] = val;
+    setDraft(next);
+  };
+  const setEnabled = (sym: string, val: boolean) => {
+    const next = structuredClone(draft);
+    next.strategies[sym].enabled = val;
+    setDraft(next);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    try {
+      await api.saveSettings(draft);
+      setMsg('✓ Saved. The bot picks this up on its next cycle.');
+      reload();
+    } catch (e: any) {
+      setMsg(`⚠️ ${e?.message ?? e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const numInput = (val: any, onChange: (n: number | null) => void) => (
+    <input
+      type="number"
+      step="any"
+      value={val ?? ''}
+      onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+    />
+  );
+
+  return (
+    <>
+      <h3>Global Guidelines</h3>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={!!g.trading_enabled}
+          onChange={(e) => setGuideline(['trading_enabled'], e.target.checked)}
+        />
+        Trading enabled
+      </label>
+      <table>
+        <thead><tr><th>Budget</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Single order</th></tr></thead>
+        <tbody>
+          {(['dca', 'strategy'] as const).map((b) => (
+            <tr key={b}>
+              <td>{b.toUpperCase()}</td>
+              <td>{numInput(g[b]?.max_daily, (v) => setGuideline([b, 'max_daily'], v))}</td>
+              <td>{numInput(g[b]?.max_weekly, (v) => setGuideline([b, 'max_weekly'], v))}</td>
+              <td>{numInput(g[b]?.max_monthly, (v) => setGuideline([b, 'max_monthly'], v))}</td>
+              <td>{numInput(g[b]?.max_single_order, (v) => setGuideline([b, 'max_single_order'], v))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h3>Per-Security Strategies</h3>
+      {Object.entries(draft.strategies as Record<string, any>).map(([sym, s]) => {
+        const modeKey = s.mode as string; // 'increase_holding' | 'cash_out' | 'hold'
+        const params = s[modeKey] ?? {};
+        return (
+          <div className="strat" key={sym}>
+            <div className="strat-head">
+              <strong>{sym}</strong>
+              <span className="badge">{modeKey}</span>
+              <label className="toggle">
+                <input type="checkbox" checked={!!s.enabled} onChange={(e) => setEnabled(sym, e.target.checked)} />
+                enabled
+              </label>
+            </div>
+            <div className="params">
+              {Object.keys(params).map((k) => (
+                <label key={k} className="param">
+                  <span>{k}</span>
+                  {numInput(params[k], (v) => setParam(sym, modeKey, k, v))}
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="savebar">
+        <button onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
+        {msg && <span className={msg.startsWith('✓') ? 'pos' : 'error'}>{msg}</span>}
+      </div>
+    </>
+  );
+}
+
+function Card({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="card">
+      <div className="muted small">{label}</div>
+      <div className="card-value">{value}</div>
+      {sub && <div className="muted small">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Sidebar (budget status) ──────────────────────────────────────────────
+function Sidebar({ signOut, username }: { signOut?: () => void; username?: string }) {
+  const { data } = useAsync<Status>(api.status);
+  return (
+    <aside className="sidebar">
+      <h2>⚙️ Status</h2>
+      {data ? (
+        <>
+          <div className={`pill ${data.tradingEnabled ? 'pos' : 'neg'}`}>
+            Trading {data.tradingEnabled ? 'ON' : 'OFF'}
+          </div>
+          <div className="budget">
+            <div className="muted small">DCA daily</div>
+            <div>{usd(data.dca.spentToday)} / {usd(data.dca.maxDaily)}</div>
+          </div>
+          <div className="budget">
+            <div className="muted small">Strategy daily</div>
+            <div>{usd(data.strategy.spentToday)} / {usd(data.strategy.maxDaily)}</div>
+          </div>
+        </>
+      ) : (
+        <p className="muted small">Loading…</p>
+      )}
+      <div className="spacer" />
+      <div className="muted small">{username}</div>
+      <button className="signout" onClick={signOut}>Sign out</button>
+    </aside>
+  );
+}
+
+export default function App({ signOut, username }: { signOut?: () => void; username?: string }) {
+  const [tab, setTab] = useState<Tab>('Portfolio');
+  return (
+    <div className="layout">
+      <Sidebar signOut={signOut} username={username} />
+      <main>
+        <header>
+          <h1>📊 Investment Assistant</h1>
+          <nav>
+            {TABS.map((t) => (
+              <button key={t} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>
+            ))}
+          </nav>
+        </header>
+        {tab === 'Portfolio' && <PortfolioView />}
+        {tab === 'Signals' && <SignalsView />}
+        {tab === 'Profiles' && <ProfilesView />}
+        {tab === 'Strategies' && <StrategiesView />}
+      </main>
+    </div>
+  );
+}
