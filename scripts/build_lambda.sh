@@ -16,14 +16,14 @@ echo "Building Lambda package → $PKG"
 rm -rf "$PKG"
 mkdir -p "$PKG"
 
-# Linux arm64 wheels for the Lambda python3.10 runtime.
-# 3.10 (not 3.11+) because alpaca-trade-api pins old exact deps — websockets<11
-# and msgpack==1.0.3 — whose newest arm64 wheels stop at cp310. 3.10 is the
-# highest runtime with prebuilt wheels for the entire dependency tree.
+# Linux arm64 wheels for the Lambda python3.13 runtime.
+# We use alpaca-py (not the deprecated alpaca-trade-api), which ships modern
+# arm64 wheels for its whole dependency tree (pydantic-core, pandas, …) on
+# current CPython — so we target 3.13 and stay off the EOL 3.10 runtime.
 "$PY" -m pip install \
   --platform manylinux2014_aarch64 \
   --implementation cp \
-  --python-version 3.10 \
+  --python-version 3.13 \
   --only-binary=:all: \
   --target "$PKG" \
   --upgrade \

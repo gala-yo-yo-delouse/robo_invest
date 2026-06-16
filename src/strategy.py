@@ -23,7 +23,7 @@ from .models import (
     TradingStrategy,
 )
 from .guidelines import load_guidelines_with_spending
-from .watermark import update_high_watermark
+from .watermark import update_watermarks, DEFAULT_MAX_TICK_JUMP_PCT
 
 
 @dataclass
@@ -53,13 +53,28 @@ class StrategyEngine:
 
     def __init__(self, portfolio: Portfolio, strategies: dict[str, TradingStrategy],
                  guidelines: InvestmentGuidelines, price_fetcher=None,
-                 last_dca_dates: dict[str, date] = None):
+                 last_dca_dates: dict[str, date] = None,
+                 persist_watermarks: bool = False,
+                 watermark_max_jump_pct: float = DEFAULT_MAX_TICK_JUMP_PCT):
         self.portfolio = portfolio
         self.strategies = strategies
         self.guidelines = load_guidelines_with_spending(guidelines)
         self.price_fetcher = price_fetcher  # callable(symbol) -> float
         self.last_dca_dates = last_dca_dates  # symbol → last DCA execution date
+        # Only the trading loop persists peaks; preview paths (dashboard, CLI
+        # signals) leave this False so viewing never mutates stored state.
+        self.persist_watermarks = persist_watermarks
+        self.watermark_max_jump_pct = watermark_max_jump_pct
         self.signals: list[TradeSignal] = []
+
+    def _watermarks(self, symbol: str, current_price: float) -> tuple[float, float]:
+        """Return ``(high, recent_high)`` — all-time ratchet for stops/profit
+        protection and rolling recent high for buy-the-dip."""
+        return update_watermarks(
+            symbol, current_price,
+            persist=self.persist_watermarks,
+            max_jump_pct=self.watermark_max_jump_pct,
+        )
 
     def evaluate_all(self) -> list[TradeSignal]:
         """Evaluate all securities and return trade signals."""
@@ -132,9 +147,9 @@ class StrategyEngine:
             ))
             return
 
-        # Trailing stop check — uses persisted high watermark
+        # Trailing stop check — uses the all-time high watermark (ratchet)
         if params.trailing_stop_pct is not None:
-            peak = update_high_watermark(symbol, current_price)
+            peak, _ = self._watermarks(symbol, current_price)
             pct_from_peak = ((current_price - peak) / peak) * 100 if peak > 0 else 0
 
             if pct_from_peak <= params.trailing_stop_pct:
@@ -190,21 +205,23 @@ class StrategyEngine:
         if not params:
             return
 
-        # Update watermark — used by both take-profit (indirectly) and buy-dip
-        watermark = update_high_watermark(symbol, current_price)
+        # Update both peaks once — all-time ``high`` for profit protection, rolling
+        # ``recent_high`` for buy-the-dip.
+        high, recent_high = self._watermarks(symbol, current_price)
 
-        # Profit protection — sell when price is dropping from peak while still in profit
+        # Profit protection — sell when price is dropping from the all-time peak
+        # while still in profit.
         if holding and holding.quantity > 0 and holding.average_cost_basis > 0:
-            if params.should_protect_profit(current_price, holding.average_cost_basis, watermark):
+            if params.should_protect_profit(current_price, holding.average_cost_basis, high):
                 current_profit_pct = ((current_price - holding.average_cost_basis) / holding.average_cost_basis) * 100
-                pct_from_peak = ((current_price - watermark) / watermark) * 100
+                pct_from_peak = ((current_price - high) / high) * 100
                 sell_qty = round(holding.quantity * (params.sell_quantity_pct / 100), 4)
                 self.signals.append(TradeSignal(
                     symbol=symbol,
                     side=OrderSide.SELL,
                     quantity=sell_qty,
                     reason=(
-                        f"PROFIT PROTECTION: {pct_from_peak:+.1f}% from peak ${watermark:,.2f}, "
+                        f"PROFIT PROTECTION: {pct_from_peak:+.1f}% from peak ${high:,.2f}, "
                         f"locking {current_profit_pct:+.1f}% gain (floor: {params.min_profit_pct}%)"
                     ),
                     estimated_value=sell_qty * current_price,
@@ -235,9 +252,9 @@ class StrategyEngine:
                     priority=2,
                 ))
 
-        # Buy-the-dip check — triggers when price drops from watermark (peak)
+        # Buy-the-dip check — triggers when price drops from the rolling recent high
         if params.buy_dip_pct < 0 and holding:
-            pct_from_peak = ((current_price - watermark) / watermark) * 100 if watermark > 0 else 0
+            pct_from_peak = ((current_price - recent_high) / recent_high) * 100 if recent_high > 0 else 0
 
             if pct_from_peak <= params.buy_dip_pct:
                 dip_buy_value = params.dca_amount if params.dca_amount > 0 else self.guidelines.strategy.max_single_order
@@ -248,7 +265,7 @@ class StrategyEngine:
                         symbol=symbol,
                         side=OrderSide.BUY,
                         quantity=buy_qty,
-                        reason=f"BUY-THE-DIP: {pct_from_peak:+.1f}% from peak ${watermark:,.2f} (trigger: {params.buy_dip_pct}%)",
+                        reason=f"BUY-THE-DIP: {pct_from_peak:+.1f}% from recent high ${recent_high:,.2f} (trigger: {params.buy_dip_pct}%)",
                         estimated_value=dip_buy_value,
                         strategy_mode=StrategyMode.INCREASE_HOLDING,
                         buy_type=BuyType.STRATEGY,

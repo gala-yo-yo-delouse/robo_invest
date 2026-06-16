@@ -14,7 +14,12 @@ export interface Holding {
   averageCostBasis: number;
   gainLossDollar: number;
   gainLossPercent: number;
+  todayGainLossDollar: number;
+  todayGainLossPercent: number;
   percentOfAccount: number;
+  costBasisPctOfAccount: number;
+  week52High: number;
+  week52Low: number;
 }
 
 export interface Portfolio {
@@ -23,6 +28,8 @@ export interface Portfolio {
   investedValue: number;
   cashBalance: number;
   cashPct: number;
+  todayGainLoss: number;
+  totalGainLoss: number;
   holdings: Holding[];
 }
 
@@ -80,5 +87,11 @@ export const api = {
   status: () => client.queries.getStatus().then(unwrap<Status>),
   getSettings: () => client.queries.getSettings().then(unwrap<Settings>),
   saveSettings: (settings: Settings) =>
-    client.mutations.saveSettings({ settings }).then(unwrap<Settings>),
+    // AppSync's AWSJSON scalar expects a JSON *string*, not a raw object — the
+    // Amplify client passes custom-op args through verbatim, so stringify here
+    // (the query Lambda json.loads() it back). Sending a raw object yields
+    // "Variable 'settings' has an invalid value."
+    client.mutations
+      .saveSettings({ settings: JSON.stringify(settings) })
+      .then(unwrap<Settings>),
 };

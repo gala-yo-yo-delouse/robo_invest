@@ -1,12 +1,7 @@
 # Lambda runtime deps — excludes streamlit/plotly (dashboard-only).
-# boto3 is preinstalled in the Lambda base image; pandas is pulled in
-# transitively by alpaca-trade-api.
-alpaca-trade-api>=3.0.0
+# boto3 is preinstalled in the Lambda base image. pandas is used by alpaca-py
+# (was transitive before) so we pin it explicitly here.
+alpaca-py>=0.30.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
-
-# Conditional deps that aiohttp/multidict require only on Python <3.11. The
-# Lambda runs 3.10, but pip's cross-version (--python-version) build skips these
-# environment-marker deps, so pin them explicitly to keep the package complete.
-async-timeout>=4.0
-typing-extensions>=4.1.0
+pandas>=2.0.0

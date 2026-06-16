@@ -26,7 +26,7 @@ pip install -r requirements.txt
 
 ### Cloud (AWS profile `robotrade-admin`, region `us-east-1`)
 ```bash
-npm run build:lambda                   # vendor the Docker-free arm64/py3.10 Lambda zip
+npm run build:lambda                   # vendor the Docker-free arm64/py3.13 Lambda zip
 npm run deploy:dev | deploy:prod       # deploy a backend stack (see Environments)
 npm run host:dev   | host:prod         # build + publish the React dashboard to Amplify Hosting
 ```
@@ -113,7 +113,7 @@ Promote = deploy the same code with `ROBOTRADE_ENV=prod`. See `DEPLOY.md`.
   params/budgets, change mode).
 - **IaC** (`amplify/backend.ts`) — Amplify Gen 2 + CDK: auth, data (AppSync custom
   queries → query Lambda by name), DynamoDB table, both Python Lambdas (arm64 /
-  py3.10 zip, no Docker), EventBridge schedule, Secrets Manager grants.
+  py3.13 zip, no Docker), EventBridge schedule, Secrets Manager grants.
 - **Hosting** — `scripts/deploy_frontend.sh <env>`: manual Amplify Hosting deploy
   (no Git), one app per env.
 
@@ -148,8 +148,9 @@ TELEGRAM_BOT_TOKEN=...    TELEGRAM_CHAT_ID=...
 **Cloud** — credentials in AWS Secrets Manager (user-owned, not CDK-managed):
 `robotrade/alpaca-paper`, `robotrade/alpaca-live`, `robotrade/telegram`. The
 Lambdas select the Alpaca secret via `ALPACA_ENV` (paper|live, derived from
-`ROBOTRADE_ENV`). The Lambda runtime is **Python 3.10** (the old
-`alpaca-trade-api` pins deps whose arm64 wheels stop at 3.10).
+`ROBOTRADE_ENV`). The Lambda runtime is **Python 3.13** on the maintained
+**`alpaca-py`** SDK (migrated off the deprecated `alpaca-trade-api`, which had
+pinned the runtime to the now-EOL 3.10).
 
 ## Local continuous mode (`python main.py run`)
 

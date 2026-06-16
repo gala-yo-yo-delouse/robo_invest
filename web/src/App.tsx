@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
+  type Holding,
   type Portfolio,
   type Profile,
   type Settings,
@@ -14,6 +15,20 @@ type Tab = (typeof TABS)[number];
 const usd = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const pct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+
+// 52-week "low – high" plus where the current price sits within that range.
+function range52(h: Holding) {
+  if (h.week52High <= 0 || h.week52Low <= 0) return <span className="muted">—</span>;
+  const span = h.week52High - h.week52Low;
+  const at = span > 0 ? ((h.lastPrice - h.week52Low) / span) * 100 : 0;
+  const pos = Math.max(0, Math.min(100, at));
+  return (
+    <span title={`${pos.toFixed(0)}% of 52-week range`}>
+      {usd(h.week52Low)} – {usd(h.week52High)}{' '}
+      <span className="muted small">({pos.toFixed(0)}%)</span>
+    </span>
+  );
+}
 
 // Small async-data hook with loading/error states.
 function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
@@ -49,12 +64,21 @@ function PortfolioView() {
         <Card label="Total" value={usd(data.totalValue)} />
         <Card label="Invested" value={usd(data.investedValue)} />
         <Card label="Cash" value={usd(data.cashBalance)} sub={`${data.cashPct.toFixed(1)}%`} />
+        <Card label="Gain/Loss Today" value={usd(data.todayGainLoss)}
+              valueClass={data.todayGainLoss >= 0 ? 'pos' : 'neg'} />
+        <Card label="Gain/Loss Total" value={usd(data.totalGainLoss)}
+              valueClass={data.totalGainLoss >= 0 ? 'pos' : 'neg'} />
       </div>
       <table>
         <thead>
           <tr>
-            <th>Symbol</th><th>Shares</th><th>Price</th><th>Value</th>
-            <th>Cost Basis</th><th>Gain/Loss</th><th>%</th>
+            <th>Symbol</th><th>Shares</th><th>Price</th>
+            <th>52-Wk Range</th>
+            <th>Value</th>
+            <th>Cost Basis</th>
+            <th>% Acct (Cost)</th><th>% Acct (Value)</th>
+            <th>Gain/Loss Today</th><th>%</th>
+            <th>Gain/Loss Total</th><th>%</th>
           </tr>
         </thead>
         <tbody>
@@ -63,8 +87,13 @@ function PortfolioView() {
               <td>{h.symbol}</td>
               <td>{h.quantity.toFixed(2)}</td>
               <td>{usd(h.lastPrice)}</td>
+              <td>{range52(h)}</td>
               <td>{usd(h.currentValue)}</td>
               <td>{usd(h.costBasisTotal)}</td>
+              <td>{h.costBasisPctOfAccount.toFixed(1)}%</td>
+              <td>{h.percentOfAccount.toFixed(1)}%</td>
+              <td className={h.todayGainLossDollar >= 0 ? 'pos' : 'neg'}>{usd(h.todayGainLossDollar)}</td>
+              <td className={h.todayGainLossPercent >= 0 ? 'pos' : 'neg'}>{pct(h.todayGainLossPercent)}</td>
               <td className={h.gainLossDollar >= 0 ? 'pos' : 'neg'}>{usd(h.gainLossDollar)}</td>
               <td className={h.gainLossPercent >= 0 ? 'pos' : 'neg'}>{pct(h.gainLossPercent)}</td>
             </tr>
@@ -278,6 +307,14 @@ function StrategiesView() {
           ))}
         </tbody>
       </table>
+      <p className="muted small">
+        Two separate wallets. <strong>DCA</strong> funds scheduled DCA buys;{' '}
+        <strong>Strategy</strong> funds buy-the-dip signals. Each buy is checked against
+        its wallet's single / daily / weekly / monthly caps (0 = no limit) and{' '}
+        <em>reserved as it's approved</em>, in the security order below — so when a wallet
+        runs low, symbols higher in the list are funded first. The wallets are independent:
+        DCA buys never draw down the Strategy budget, or vice-versa.
+      </p>
 
       <h3>Per-Security Strategies</h3>
       <p className="muted small">
@@ -342,11 +379,12 @@ function StrategiesView() {
   );
 }
 
-function Card({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Card({ label, value, sub, valueClass }:
+    { label: string; value: string; sub?: string; valueClass?: string }) {
   return (
     <div className="card">
       <div className="muted small">{label}</div>
-      <div className="card-value">{value}</div>
+      <div className={`card-value${valueClass ? ' ' + valueClass : ''}`}>{value}</div>
       {sub && <div className="muted small">{sub}</div>}
     </div>
   );

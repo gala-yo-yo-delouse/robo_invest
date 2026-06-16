@@ -19,6 +19,7 @@ to wrestle DynamoDB's Decimal/float number type.
 import json
 import os
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from pathlib import Path
 
 import yaml
@@ -30,21 +31,40 @@ _SETTINGS_FILE = _CONFIG_DIR / "settings.yaml"
 
 _EMPTY_LEDGER = {"entries": [], "last_reset": {}}
 
-# DynamoDB partition keys for the three blobs (single-table design).
-_PK_WATERMARKS = "watermarks"
+# DynamoDB partition keys (single-table design). Watermarks are stored one item
+# per symbol (pk = "wm#<symbol>") so peaks can be updated atomically; the ledger
+# and settings stay single JSON-string blobs.
+_WM_PREFIX = "wm#"
 _PK_LEDGER = "ledger"
 _PK_SETTINGS = "config"
 
 
 class StorageBackend(ABC):
-    """Read/write the three state blobs. Each returns/accepts a plain dict."""
+    """Read/write bot state. Watermarks are per-symbol (atomic peak ratchet);
+    ledger and settings are single dict blobs."""
+
+    # ── watermarks (per-symbol) ──────────────────────────────────────────
+    @abstractmethod
+    def read_watermark(self, symbol: str) -> dict | None: ...
 
     @abstractmethod
-    def load_watermarks(self) -> dict: ...
+    def write_watermark(self, symbol: str, entry: dict) -> None: ...
 
     @abstractmethod
-    def save_watermarks(self, data: dict) -> None: ...
+    def bump_watermark_high(self, symbol: str, price: float, updated_at: str) -> float:
+        """Atomically set high = max(high, price); return the resulting high."""
 
+    @abstractmethod
+    def bump_watermark_recent_high(self, symbol: str, price: float, updated_at: str) -> float:
+        """Atomically set recent_high = max(recent_high, price); return the result."""
+
+    @abstractmethod
+    def delete_watermark(self, symbol: str) -> None: ...
+
+    @abstractmethod
+    def list_watermarks(self) -> dict[str, dict]: ...
+
+    # ── ledger + settings (single blob each) ─────────────────────────────
     @abstractmethod
     def load_ledger(self) -> dict: ...
 
@@ -59,18 +79,60 @@ class StorageBackend(ABC):
 
 
 class LocalBackend(StorageBackend):
-    """JSON/YAML files under config/ — the original file-based behaviour."""
+    """JSON/YAML files under config/ — the original file-based behaviour.
 
-    def load_watermarks(self) -> dict:
+    Watermarks live in one JSON file keyed by symbol; since the local CLI is
+    single-process the read-modify-write per op is effectively atomic.
+    """
+
+    def _load_wm(self) -> dict:
         if _WATERMARK_FILE.exists():
             with open(_WATERMARK_FILE, "r") as f:
                 return json.load(f)
         return {}
 
-    def save_watermarks(self, data: dict) -> None:
+    def _save_wm(self, data: dict) -> None:
         _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(_WATERMARK_FILE, "w") as f:
             json.dump(data, f, indent=2)
+
+    def read_watermark(self, symbol: str) -> dict | None:
+        return self._load_wm().get(symbol)
+
+    def write_watermark(self, symbol: str, entry: dict) -> None:
+        data = self._load_wm()
+        cur = data.get(symbol, {})
+        cur.update({k: v for k, v in entry.items() if v is not None})
+        data[symbol] = cur
+        self._save_wm(data)
+
+    def bump_watermark_high(self, symbol: str, price: float, updated_at: str) -> float:
+        data = self._load_wm()
+        entry = data.get(symbol, {"high": 0.0})
+        if price > entry.get("high", 0.0):
+            entry["high"] = price
+            entry["updated_at"] = updated_at
+            data[symbol] = entry
+            self._save_wm(data)
+        return data.get(symbol, {}).get("high", price)
+
+    def bump_watermark_recent_high(self, symbol: str, price: float, updated_at: str) -> float:
+        data = self._load_wm()
+        entry = data.get(symbol, {"recent_high": 0.0})
+        if price > entry.get("recent_high", 0.0):
+            entry["recent_high"] = price
+            entry["updated_at"] = updated_at
+            data[symbol] = entry
+            self._save_wm(data)
+        return data.get(symbol, {}).get("recent_high", price)
+
+    def delete_watermark(self, symbol: str) -> None:
+        data = self._load_wm()
+        if data.pop(symbol, None) is not None:
+            self._save_wm(data)
+
+    def list_watermarks(self) -> dict[str, dict]:
+        return self._load_wm()
 
     def load_ledger(self) -> dict:
         if _LEDGER_FILE.exists():
@@ -120,11 +182,85 @@ class DynamoBackend(StorageBackend):
     def _put(self, pk: str, obj) -> None:
         self._table.put_item(Item={"pk": pk, "data": json.dumps(obj, default=str)})
 
-    def load_watermarks(self) -> dict:
-        return self._get(_PK_WATERMARKS, {})
+    @staticmethod
+    def _wm_entry(item: dict) -> dict:
+        return {
+            "high": float(item.get("high", 0.0)),
+            "recent_high": float(item.get("recent_high", 0.0)),
+            "since": item.get("since"),
+            "updated_at": item.get("updated_at"),
+            "reconciled": item.get("reconciled"),
+        }
 
-    def save_watermarks(self, data: dict) -> None:
-        self._put(_PK_WATERMARKS, data)
+    def read_watermark(self, symbol: str) -> dict | None:
+        resp = self._table.get_item(Key={"pk": _WM_PREFIX + symbol})
+        item = resp.get("Item")
+        return self._wm_entry(item) if item else None
+
+    def write_watermark(self, symbol: str, entry: dict) -> None:
+        item = {"pk": _WM_PREFIX + symbol}
+        if entry.get("high") is not None:
+            item["high"] = Decimal(str(entry["high"]))
+        if entry.get("recent_high") is not None:
+            item["recent_high"] = Decimal(str(entry["recent_high"]))
+        for k in ("since", "updated_at", "reconciled"):
+            if entry.get(k) is not None:
+                item[k] = entry[k]
+        self._table.put_item(Item=item)
+
+    def bump_watermark_high(self, symbol: str, price: float, updated_at: str) -> float:
+        from botocore.exceptions import ClientError
+        try:
+            # Atomic ratchet: only writes when the new price is a strict new peak,
+            # so concurrent writers (trading Lambda + any other caller) can't lose
+            # each other's updates.
+            self._table.update_item(
+                Key={"pk": _WM_PREFIX + symbol},
+                UpdateExpression="SET high = :p, updated_at = :t",
+                ConditionExpression="attribute_not_exists(high) OR high < :p",
+                ExpressionAttributeValues={":p": Decimal(str(price)), ":t": updated_at},
+            )
+            return price
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                cur = self.read_watermark(symbol)
+                return cur["high"] if cur else price
+            raise
+
+    def bump_watermark_recent_high(self, symbol: str, price: float, updated_at: str) -> float:
+        from botocore.exceptions import ClientError
+        try:
+            # Atomic rolling-high ratchet for buy-the-dip — mirrors
+            # bump_watermark_high but on the recent_high attribute. (Decay of the
+            # rolling window happens via reconcile, not here.)
+            self._table.update_item(
+                Key={"pk": _WM_PREFIX + symbol},
+                UpdateExpression="SET recent_high = :p, updated_at = :t",
+                ConditionExpression="attribute_not_exists(recent_high) OR recent_high < :p",
+                ExpressionAttributeValues={":p": Decimal(str(price)), ":t": updated_at},
+            )
+            return price
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                cur = self.read_watermark(symbol)
+                return cur["recent_high"] if cur else price
+            raise
+
+    def delete_watermark(self, symbol: str) -> None:
+        self._table.delete_item(Key={"pk": _WM_PREFIX + symbol})
+
+    def list_watermarks(self) -> dict[str, dict]:
+        from boto3.dynamodb.conditions import Attr
+        out: dict[str, dict] = {}
+        kwargs = {"FilterExpression": Attr("pk").begins_with(_WM_PREFIX)}
+        while True:
+            resp = self._table.scan(**kwargs)
+            for item in resp.get("Items", []):
+                out[item["pk"][len(_WM_PREFIX):]] = self._wm_entry(item)
+            if "LastEvaluatedKey" not in resp:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return out
 
     def load_ledger(self) -> dict:
         return self._get(_PK_LEDGER, dict(_EMPTY_LEDGER))

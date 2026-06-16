@@ -45,19 +45,9 @@ def fetch_live_profiles(symbols: list[str]):
             profiles[symbol] = {
                 "price": client.get_current_price(symbol),
             }
-            try:
-                from datetime import datetime, timedelta
-                bar_list = list(client.api.get_bars(
-                    symbol, "1Day",
-                    start=(datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d"),
-                ))
-                profiles[symbol]["bars"] = [
-                    {"date": str(b.t)[:10], "open": float(b.o), "high": float(b.h),
-                     "low": float(b.l), "close": float(b.c), "volume": int(b.v)}
-                    for b in bar_list
-                ]
-            except Exception:
-                profiles[symbol]["bars"] = []
+            from datetime import datetime, timedelta
+            start = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+            profiles[symbol]["bars"] = client.get_bars(symbol, start)
         return profiles, True
     except Exception as e:
         return {}, False

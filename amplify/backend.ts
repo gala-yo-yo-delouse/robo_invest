@@ -60,7 +60,7 @@ const commonEnv = {
 };
 
 const sharedProps = {
-  runtime: lambda.Runtime.PYTHON_3_10,
+  runtime: lambda.Runtime.PYTHON_3_13,
   architecture: lambda.Architecture.ARM_64,
   code,
   memorySize: 1024, // headroom for the pandas import on cold start

@@ -34,8 +34,13 @@ class Holding:
     average_cost_basis: float
     total_gain_loss_dollar: float
     total_gain_loss_percent: float
-    percent_of_account: float
+    percent_of_account: float               # market value as % of total account
     asset_type: AssetType = AssetType.EQUITY
+    today_gain_loss_dollar: float = 0.0    # intraday P/L (since prior close)
+    today_gain_loss_percent: float = 0.0
+    cost_basis_pct_of_account: float = 0.0  # cost basis as % of total account
+    week_52_high: float = 0.0
+    week_52_low: float = 0.0
 
     @property
     def is_profitable(self) -> bool:
@@ -212,3 +217,11 @@ class Portfolio:
         if self.total_value == 0:
             return 0
         return (self.cash_balance / self.total_value) * 100
+
+    @property
+    def today_gain_loss(self) -> float:
+        return sum(h.today_gain_loss_dollar for h in self.holdings.values())
+
+    @property
+    def total_gain_loss(self) -> float:
+        return sum(h.total_gain_loss_dollar for h in self.holdings.values())

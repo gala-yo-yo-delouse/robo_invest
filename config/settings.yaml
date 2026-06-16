@@ -38,6 +38,23 @@ guidelines:
 #   profit_trail_pct:     Optional — sell when price drops this % from peak while above min profit (e.g. -5.0)
 #   sell_quantity_pct:    % of position to sell when profit protection triggers (default: 100)
 
+# ─── Watermark (peak-tracking) tuning ─────────────────────────────────
+# Two peaks are tracked per held symbol. Optional — these defaults apply if the
+# section is absent.
+watermark:
+  # Trailing-stop / profit-protection peak (the all-time ``high``).
+  #   0 = all-time ratchet anchored at the position's entry (peak only ever rises
+  #       until the position is exited).
+  #   >0 = rolling peak over the last N days, which decays as old highs age out.
+  window_days: 0
+  # Buy-the-dip peak (the rolling ``recent_high``): a recent high over the last
+  # N days that DECAYS as old highs age out, so dip-buys measure against the
+  # *recent* high rather than a stale all-time peak.
+  dip_lookback_days: 15
+  # Ignore a single sampled tick more than this % above the current peak (bad
+  # print guard). Reconciliation from real bars bypasses it. 0 disables.
+  max_tick_jump_pct: 25.0
+
 strategies:
   # ── ETFs ────────────────────────────────────────────────────────────
   GLD:                              # Gold/Inflation Hedge

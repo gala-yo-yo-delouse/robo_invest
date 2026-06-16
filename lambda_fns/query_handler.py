@@ -46,7 +46,12 @@ def _holding(h) -> dict:
         "averageCostBasis": h.average_cost_basis,
         "gainLossDollar": h.total_gain_loss_dollar,
         "gainLossPercent": h.total_gain_loss_percent,
+        "todayGainLossDollar": h.today_gain_loss_dollar,
+        "todayGainLossPercent": h.today_gain_loss_percent,
         "percentOfAccount": h.percent_of_account,
+        "costBasisPctOfAccount": h.cost_basis_pct_of_account,
+        "week52High": h.week_52_high,
+        "week52Low": h.week_52_low,
     }
 
 
@@ -79,13 +84,15 @@ def _budget(b) -> dict:
 # ── field handlers ────────────────────────────────────────────────────
 
 def _get_portfolio(client) -> dict:
-    p = client.build_portfolio()
+    p = client.build_portfolio(include_ranges=True)
     return {
         "accountId": p.account_id,
         "totalValue": p.total_value,
         "investedValue": p.invested_value,
         "cashBalance": p.cash_balance,
         "cashPct": p.cash_pct,
+        "todayGainLoss": p.today_gain_loss,
+        "totalGainLoss": p.total_gain_loss,
         "holdings": [_holding(h) for h in sorted(
             p.holdings.values(), key=lambda x: x.current_value, reverse=True)],
     }
@@ -112,14 +119,7 @@ def _get_profiles(client) -> list:
     out = []
     for sym in sorted(p.holdings.keys()):
         h = p.holdings[sym]
-        try:
-            bars = [
-                {"date": str(b.t)[:10], "open": float(b.o), "high": float(b.h),
-                 "low": float(b.l), "close": float(b.c), "volume": int(b.v)}
-                for b in client.api.get_bars(sym, "1Day", start=start)
-            ]
-        except Exception:
-            bars = []
+        bars = client.get_bars(sym, start)
         out.append({
             "symbol": sym,
             "description": h.description,

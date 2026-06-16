@@ -23,10 +23,10 @@ from .guidelines import (
     load_guidelines_with_spending,
     record_spend,
 )
-from .models import BuyType, OrderSide, StrategyMode
+from .models import OrderSide
 from .notifier import notify_started, notify_stopped, notify_order, notify_error, notify_summary
 from .strategy import StrategyEngine, print_signals
-from .watermark import reset_watermark
+from .watermark import reset_watermark, reconcile_watermarks, DEFAULT_MAX_TICK_JUMP_PCT
 
 LOG_PATH = Path(__file__).parent.parent / "logs" / "runner.log"
 
@@ -68,7 +68,7 @@ def run(config_path: Path, interval_minutes: int = 5):
 
     while True:
         try:
-            clock = client.api.get_clock()
+            clock = client.get_clock()
 
             if not clock.is_open:
                 next_open = clock.next_open
@@ -124,15 +124,34 @@ def run_one_cycle(client: AlpacaClient, config_path: Path) -> dict:
     guidelines = build_guidelines(config)
     strategies = build_strategies(config)
 
+    wm_cfg = config.get("watermark", {})
+    stop_window = int(wm_cfg.get("window_days", 0))         # trailing-stop / profit-protection ratchet window
+    dip_window = int(wm_cfg.get("dip_lookback_days", 15))   # buy-the-dip rolling recent-high window
+    wm_max_jump = float(wm_cfg.get("max_tick_jump_pct", DEFAULT_MAX_TICK_JUMP_PCT))
+
+    # Reconcile peaks against real market bars before evaluating: GC exited
+    # symbols, seed new positions, and recover highs missed during downtime.
+    try:
+        summary = reconcile_watermarks(
+            portfolio.holdings.keys(), client.get_daily_highs,
+            stop_window_days=stop_window, dip_window_days=dip_window,
+        )
+        if summary.get("pruned") or summary.get("seeded"):
+            logging.info("Watermark reconcile: %s", summary)
+    except Exception as e:
+        logging.warning("Watermark reconcile failed (continuing): %s", e)
+
     # DCA timing and dedup
     last_dca = get_last_dca_dates()
     today_executed = get_today_executed()
 
-    # Evaluate
+    # Evaluate — this is the only path that persists watermark peaks.
     engine = StrategyEngine(
         portfolio, strategies, guidelines,
         price_fetcher=client.get_current_price,
         last_dca_dates=last_dca,
+        persist_watermarks=True,
+        watermark_max_jump_pct=wm_max_jump,
     )
     signals = engine.evaluate_all()
 
@@ -159,6 +178,14 @@ def run_one_cycle(client: AlpacaClient, config_path: Path) -> dict:
             if ok:
                 total_executed += 1
                 total_value += signal.estimated_value
+                # Reset the watermark on any full exit (all forks + the case
+                # where a sell closes the position) so a later re-entry starts
+                # fresh instead of measuring against a stale peak.
+                if signal.side == OrderSide.SELL:
+                    h = portfolio.holdings.get(signal.symbol)
+                    if h and signal.quantity >= h.quantity - 1e-9:
+                        reset_watermark(signal.symbol)
+                        logging.info("Watermark reset for %s (full exit)", signal.symbol)
         if total_executed > 0:
             logging.info("Executed %d orders, total=$%.2f", total_executed, total_value)
             notify_summary(total_executed, total_value)
@@ -198,11 +225,6 @@ def _execute_signal(client: AlpacaClient, signal) -> bool:
             signal.side.value, signal.symbol, signal.quantity,
             signal.estimated_value, signal.reason, result['status'],
         )
-
-        # Reset watermark after profit protection sell so the cycle starts fresh
-        if signal.side == OrderSide.SELL and signal.strategy_mode == StrategyMode.INCREASE_HOLDING:
-            reset_watermark(signal.symbol)
-            logging.info("Watermark reset for %s after profit protection sell", signal.symbol)
 
         return True
     except Exception as e:

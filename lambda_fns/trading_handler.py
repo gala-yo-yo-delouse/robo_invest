@@ -38,7 +38,7 @@ def handler(event, context):
 
     # EventBridge fires on a market-hours schedule, but guard against holidays
     # and early closes using Alpaca's authoritative clock.
-    clock = client.api.get_clock()
+    clock = client.get_clock()
     if not clock.is_open:
         logging.info("Market closed (next open %s) — skipping cycle.", clock.next_open)
         return {"skipped": True, "reason": "market_closed"}
