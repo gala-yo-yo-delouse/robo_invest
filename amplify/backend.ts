@@ -57,6 +57,7 @@ const commonEnv = {
   STORAGE_BACKEND: 'dynamodb',
   STATE_TABLE: stateTable.tableName,
   ALPACA_ENV,
+  ROBOTRADE_ENV: ENV, // so notifications can label which stack sent them
 };
 
 const sharedProps = {

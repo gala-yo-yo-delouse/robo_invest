@@ -10,6 +10,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_prefix() -> str:
+    """A leading tag identifying which stack sent this message.
+
+    dev and prod share one Telegram chat, so every alert is prefixed with its
+    environment. prod/live is flagged loudly (real money); everything else
+    (dev/paper, local CLI) is marked paper. Read at call time so the value
+    hydrated from env after import is picked up.
+    """
+    env = (os.getenv("ROBOTRADE_ENV") or "").lower()
+    money = (os.getenv("ALPACA_ENV") or "").lower()
+    if env == "prod" or money == "live":
+        return "🔴 <b>[PROD · LIVE]</b>\n"
+    label = env.upper() if env else "LOCAL"
+    return f"🧪 <b>[{label} · PAPER]</b>\n"
+
+
 def _send(text: str):
     """Send a message via Telegram Bot API.
 
@@ -25,7 +41,7 @@ def _send(text: str):
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         data = urllib.parse.urlencode({
             "chat_id": chat_id,
-            "text": text,
+            "text": _env_prefix() + text,
             "parse_mode": "HTML",
         }).encode()
         urllib.request.urlopen(url, data, timeout=10)
