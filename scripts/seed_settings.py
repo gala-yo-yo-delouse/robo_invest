@@ -22,9 +22,19 @@ def main():
     settings = local.load_settings()
     n = len(settings.get("strategies", {}))
 
+    # Safety: a fresh prod deploy must come up with trading OFF so the operator
+    # configures strategies and explicitly enables it from the dashboard. dev
+    # keeps the YAML value (paper account, safe to auto-run).
+    env = os.getenv("ROBOTRADE_ENV", "dev").lower()
+    if env == "prod":
+        settings.setdefault("guidelines", {})["trading_enabled"] = False
+
     table = os.getenv("STATE_TABLE", "robotrade-state")
     DynamoBackend(table).save_settings(settings)
+    enabled = settings.get("guidelines", {}).get("trading_enabled", True)
     print(f"Seeded {n} strategies + guidelines into '{table}' (config item).")
+    print(f"  env={env}  trading_enabled={enabled}"
+          + ("  ← enable from the dashboard when ready" if not enabled else ""))
 
 
 if __name__ == "__main__":

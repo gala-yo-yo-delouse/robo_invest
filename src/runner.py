@@ -166,6 +166,24 @@ def run_one_cycle(client: AlpacaClient, config_path: Path) -> dict:
 
     total_executed = 0
     total_value = 0.0
+    # Master kill switch: when trading is disabled we still evaluate (so the
+    # dashboard/logs show what the bot *would* do) but execute nothing —
+    # buys AND sells. This is the "deploy off, configure, then enable" path.
+    # can_invest() already blocks buys, but sells (stop-loss / take-profit /
+    # trailing) don't go through the budget gate, so guard execution here too.
+    if not guidelines.trading_enabled:
+        print(f"  Trading DISABLED — {len(new_signals)} signal(s) evaluated, executing none.")
+        logging.info("Trading disabled — skipped execution of %d signal(s)", len(new_signals))
+        return {
+            "portfolio_value": portfolio.total_value,
+            "positions": len(portfolio.holdings),
+            "signals_evaluated": len(signals),
+            "signals_new": len(new_signals),
+            "executed": 0,
+            "executed_value": 0.0,
+            "trading_enabled": False,
+        }
+
     if not new_signals:
         print(f"  No new signals.")
         logging.info("No new signals (portfolio=$%.2f, %d positions)",
