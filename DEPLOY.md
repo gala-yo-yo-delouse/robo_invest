@@ -112,18 +112,59 @@ Cognito admin user.
 
 ## Go live (turn on prod)
 
-1. Put real keys in the live secret:
+Prod has **three independent safety gates**, off by default: the EventBridge
+schedule ships disabled, `trading_enabled` is forced **false** when the prod
+config is seeded (so the bot evaluates but places no orders — buys *and* sells),
+and the live secret starts stubbed. Bring them up in order.
+
+1. **Deploy the prod backend** (creates `robotrade-prod-*`, schedule disabled):
+   ```bash
+   npm run deploy:prod
+   ```
+
+2. **Put real keys in the live secret** (create it first if this is the first
+   prod deploy — see step 2 above with `--name robotrade/alpaca-live`):
    ```bash
    aws secretsmanager put-secret-value --profile robotrade-admin --region us-east-1 \
      --secret-id robotrade/alpaca-live \
      --secret-string '{"ALPACA_API_KEY":"<live>","ALPACA_SECRET_KEY":"<live>","ALPACA_BASE_URL":"https://api.alpaca.markets"}'
    ```
-2. Enable the prod schedule (it ships disabled):
+
+3. **Seed prod settings** into the prod table — comes up with trading OFF:
+   ```bash
+   AWS_PROFILE=robotrade-admin STORAGE_BACKEND=dynamodb \
+     ROBOTRADE_ENV=prod STATE_TABLE=robotrade-prod-state \
+     .venv/bin/python scripts/seed_settings.py
+   # prints: env=prod  trading_enabled=False  ← enable from the dashboard when ready
+   ```
+
+4. **Create the prod Cognito admin** (use `web/amplify_outputs.prod.json` for the
+   pool id) and **deploy the dashboard**: `npm run host:prod`.
+
+5. **Verify wiring** — fire a Telegram test at the prod Lambda; the message
+   should arrive tagged `🔴 [PROD · LIVE]`:
+   ```bash
+   aws lambda invoke --function-name robotrade-prod-trading \
+     --payload '{"ping":true}' --cli-binary-format raw-in-base64-out \
+     --profile robotrade-admin --region us-east-1 /dev/stdout
+   ```
+
+6. **Configure strategies** in the prod dashboard (Strategies tab) while trading
+   stays OFF. Then **enable the schedule** — with trading off, each cycle
+   evaluates and notifies but executes nothing, so you can watch real signals
+   against the live account risk-free:
    ```bash
    aws events enable-rule --name robotrade-prod-trading-schedule \
      --profile robotrade-admin --region us-east-1
    ```
-   Disable again any time with `aws events disable-rule --name robotrade-prod-trading-schedule …`.
+
+7. **Go hot:** when the signals look right, flip **Trading enabled** on in the
+   dashboard (Settings → Save). Orders now execute. To stop, untick it (halts
+   buys and sells instantly, no redeploy) and/or disable the rule:
+   ```bash
+   aws events disable-rule --name robotrade-prod-trading-schedule \
+     --profile robotrade-admin --region us-east-1
+   ```
 
 ## Tear down
 
