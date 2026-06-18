@@ -69,6 +69,7 @@ function PortfolioView() {
         <Card label="Gain/Loss Total" value={usd(data.totalGainLoss)}
               valueClass={data.totalGainLoss >= 0 ? 'pos' : 'neg'} />
       </div>
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
@@ -100,6 +101,7 @@ function PortfolioView() {
           ))}
         </tbody>
       </table>
+      </div>
     </>
   );
 }
@@ -120,6 +122,7 @@ function SignalsView() {
       {sections.filter(([, rows]) => rows.length > 0).map(([title, rows]) => (
         <div key={title}>
           <h3>{title}</h3>
+          <div className="table-wrap">
           <table>
             <thead><tr><th>Symbol</th><th>Qty</th><th>Est. Value</th><th>Reason</th><th>Priority</th></tr></thead>
             <tbody>
@@ -134,6 +137,7 @@ function SignalsView() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
     </>
@@ -293,6 +297,7 @@ function StrategiesView() {
         />
         Trading enabled
       </label>
+      <div className="table-wrap">
       <table>
         <thead><tr><th>Budget</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th>Single order</th></tr></thead>
         <tbody>
@@ -307,6 +312,7 @@ function StrategiesView() {
           ))}
         </tbody>
       </table>
+      </div>
       <p className="muted small">
         Two separate wallets. <strong>DCA</strong> funds scheduled DCA buys;{' '}
         <strong>Strategy</strong> funds buy-the-dip signals. Each buy is checked against

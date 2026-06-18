@@ -51,6 +51,11 @@ table { width: 100%; border-collapse: collapse; margin: 16px 0; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
 
+/* Wide tables scroll horizontally instead of breaking the layout (no effect on
+   desktop where they fit). */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 16px 0; }
+.table-wrap table { margin: 0; }
+
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .card, .profile {
   background: var(--panel);
@@ -131,3 +136,51 @@ input[type='number'] {
   padding: 9px 18px; border-radius: 6px; cursor: pointer; font-size: 14px;
 }
 .savebar button:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Mobile / narrow screens ────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Stack the sidebar above the content as a compact status bar. */
+  .layout { flex-direction: column; }
+  .sidebar {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding: 12px 16px;
+  }
+  .sidebar h2 { width: 100%; margin: 0; font-size: 14px; }
+  .budget { font-size: 13px; }
+  .spacer { display: none; }
+  .signout { width: auto; margin-left: auto; }
+
+  main { padding: 16px; max-width: 100%; }
+
+  /* Header: title on its own line, tabs as a full-width even row. */
+  header h1 { font-size: 18px; }
+  nav { display: flex; width: 100%; gap: 6px; }
+  nav button { flex: 1; margin-left: 0; padding: 10px 8px; text-align: center; }
+
+  /* Bigger touch targets for the editor controls. */
+  input[type='number'], .addsym input, .addsym select { min-height: 38px; font-size: 16px; }
+  input[type='number'] { width: 100%; }
+  .savebar button { width: 100%; padding: 12px; }
+  .savebar { flex-direction: column; align-items: stretch; }
+
+  /* Strategy editor rows: let the head + add-symbol controls wrap. */
+  .strat-head { flex-wrap: wrap; }
+  .mode-select { margin: 0; }
+  .addsym { flex-wrap: wrap; }
+  .addsym input { flex: 1 1 100%; }
+  .addsym select { flex: 1; }
+  .addsym button { flex: 1; }
+
+  /* Cards / profiles: two-up that collapses to one-up on the smallest screens. */
+  .card, .profile { flex: 1 1 calc(50% - 12px); min-width: 0; width: auto; }
+}
+
+@media (max-width: 420px) {
+  .card, .profile { flex-basis: 100%; }
+}
