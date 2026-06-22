@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   api,
   type Holding,
@@ -16,12 +16,18 @@ const usd = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const pct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
 
+// Where the current price sits within the 52-week range, 0–100 (-1 = unknown).
+function rangePos(h: Holding): number {
+  if (h.week52High <= 0 || h.week52Low <= 0) return -1;
+  const span = h.week52High - h.week52Low;
+  if (span <= 0) return 0;
+  return Math.max(0, Math.min(100, ((h.lastPrice - h.week52Low) / span) * 100));
+}
+
 // 52-week "low – high" plus where the current price sits within that range.
 function range52(h: Holding) {
-  if (h.week52High <= 0 || h.week52Low <= 0) return <span className="muted">—</span>;
-  const span = h.week52High - h.week52Low;
-  const at = span > 0 ? ((h.lastPrice - h.week52Low) / span) * 100 : 0;
-  const pos = Math.max(0, Math.min(100, at));
+  const pos = rangePos(h);
+  if (pos < 0) return <span className="muted">—</span>;
   return (
     <span title={`${pos.toFixed(0)}% of 52-week range`}>
       {usd(h.week52Low)} – {usd(h.week52High)}{' '}
@@ -55,52 +61,125 @@ function Loader({ error, loading }: { error: string | null; loading: boolean }) 
 }
 
 // ── Portfolio ────────────────────────────────────────────────────────────
+// Column config drives both render and sort. First column is frozen on scroll.
+type Col = {
+  key: string;
+  label: string;
+  num: boolean;                       // numeric sort (else string)
+  sortVal: (h: Holding) => number | string;
+  render: (h: Holding) => ReactNode;
+  cls?: (h: Holding) => string;       // colour class for the cell
+};
+const signCls = (n: number) => (n >= 0 ? 'pos' : 'neg');
+const COLS: Col[] = [
+  { key: 'symbol', label: 'Symbol', num: false, sortVal: (h) => h.symbol, render: (h) => h.symbol },
+  { key: 'shares', label: 'Shares', num: true, sortVal: (h) => h.quantity, render: (h) => h.quantity.toFixed(2) },
+  { key: 'price', label: 'Price', num: true, sortVal: (h) => h.lastPrice, render: (h) => usd(h.lastPrice) },
+  { key: 'range', label: '52-Wk Range', num: true, sortVal: (h) => rangePos(h), render: (h) => range52(h) },
+  { key: 'value', label: 'Value', num: true, sortVal: (h) => h.currentValue, render: (h) => usd(h.currentValue) },
+  { key: 'cost', label: 'Cost Basis', num: true, sortVal: (h) => h.costBasisTotal, render: (h) => usd(h.costBasisTotal) },
+  { key: 'acctCost', label: '% Acct (Cost)', num: true, sortVal: (h) => h.costBasisPctOfAccount, render: (h) => `${h.costBasisPctOfAccount.toFixed(1)}%` },
+  { key: 'acctVal', label: '% Acct (Value)', num: true, sortVal: (h) => h.percentOfAccount, render: (h) => `${h.percentOfAccount.toFixed(1)}%` },
+  { key: 'glTodayD', label: 'G/L Today', num: true, sortVal: (h) => h.todayGainLossDollar, render: (h) => usd(h.todayGainLossDollar), cls: (h) => signCls(h.todayGainLossDollar) },
+  { key: 'glTodayP', label: '% Today', num: true, sortVal: (h) => h.todayGainLossPercent, render: (h) => pct(h.todayGainLossPercent), cls: (h) => signCls(h.todayGainLossPercent) },
+  { key: 'glTotalD', label: 'G/L Total', num: true, sortVal: (h) => h.gainLossDollar, render: (h) => usd(h.gainLossDollar), cls: (h) => signCls(h.gainLossDollar) },
+  { key: 'glTotalP', label: '% Total', num: true, sortVal: (h) => h.gainLossPercent, render: (h) => pct(h.gainLossPercent), cls: (h) => signCls(h.gainLossPercent) },
+];
+
 function PortfolioView() {
   const { data, error, loading } = useAsync<Portfolio>(api.portfolio);
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'value', dir: 'desc' });
   if (!data) return <Loader error={error} loading={loading} />;
+
+  const pr = data.periodReturns ?? {};
+  const totalCost = data.holdings.reduce((s, h) => s + h.costBasisTotal, 0);
+  const prevTotal = data.totalValue - data.todayGainLoss;
+  const unrealPct = totalCost > 0 ? (data.totalGainLoss / totalCost) * 100 : null;
+  // Account-equity change per window — all the same measure (cash included).
+  const returns: { label: string; dollar: number | null; pct: number | null }[] = [
+    { label: 'Today', dollar: data.todayGainLoss, pct: prevTotal > 0 ? (data.todayGainLoss / prevTotal) * 100 : null },
+    { label: '1M', dollar: pr['1M']?.dollar ?? null, pct: pr['1M']?.pct ?? null },
+    { label: '6M', dollar: pr['6M']?.dollar ?? null, pct: pr['6M']?.pct ?? null },
+    { label: 'YTD', dollar: pr['YTD']?.dollar ?? null, pct: pr['YTD']?.pct ?? null },
+    { label: '12M', dollar: pr['12M']?.dollar ?? null, pct: pr['12M']?.pct ?? null },
+    { label: 'All', dollar: pr['ALL']?.dollar ?? null, pct: pr['ALL']?.pct ?? null },
+  ];
+
+  const col = COLS.find((c) => c.key === sort.key) ?? COLS[0];
+  const rows = [...data.holdings].sort((a, b) => {
+    const va = col.sortVal(a), vb = col.sortVal(b);
+    const cmp = typeof va === 'number' && typeof vb === 'number'
+      ? va - vb : String(va).localeCompare(String(vb));
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+  const toggleSort = (c: Col) =>
+    setSort((s) => (s.key === c.key
+      ? { key: c.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+      : { key: c.key, dir: c.num ? 'desc' : 'asc' }));
+
   return (
     <>
-      <div className="cards">
-        <Card label="Total" value={usd(data.totalValue)} />
-        <Card label="Invested" value={usd(data.investedValue)} />
-        <Card label="Cash" value={usd(data.cashBalance)} sub={`${data.cashPct.toFixed(1)}%`} />
-        <Card label="Gain/Loss Today" value={usd(data.todayGainLoss)}
-              valueClass={data.todayGainLoss >= 0 ? 'pos' : 'neg'} />
-        <Card label="Gain/Loss Total" value={usd(data.totalGainLoss)}
-              valueClass={data.totalGainLoss >= 0 ? 'pos' : 'neg'} />
-      </div>
-      <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Symbol</th><th>Shares</th><th>Price</th>
-            <th>52-Wk Range</th>
-            <th>Value</th>
-            <th>Cost Basis</th>
-            <th>% Acct (Cost)</th><th>% Acct (Value)</th>
-            <th>Gain/Loss Today</th><th>%</th>
-            <th>Gain/Loss Total</th><th>%</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.holdings.map((h) => (
-            <tr key={h.symbol}>
-              <td>{h.symbol}</td>
-              <td>{h.quantity.toFixed(2)}</td>
-              <td>{usd(h.lastPrice)}</td>
-              <td>{range52(h)}</td>
-              <td>{usd(h.currentValue)}</td>
-              <td>{usd(h.costBasisTotal)}</td>
-              <td>{h.costBasisPctOfAccount.toFixed(1)}%</td>
-              <td>{h.percentOfAccount.toFixed(1)}%</td>
-              <td className={h.todayGainLossDollar >= 0 ? 'pos' : 'neg'}>{usd(h.todayGainLossDollar)}</td>
-              <td className={h.todayGainLossPercent >= 0 ? 'pos' : 'neg'}>{pct(h.todayGainLossPercent)}</td>
-              <td className={h.gainLossDollar >= 0 ? 'pos' : 'neg'}>{usd(h.gainLossDollar)}</td>
-              <td className={h.gainLossPercent >= 0 ? 'pos' : 'neg'}>{pct(h.gainLossPercent)}</td>
-            </tr>
+      <div className="summary">
+        <div className="summary-head">
+          <div>
+            <div className="muted small">Total Value</div>
+            <div className="total-value">{usd(data.totalValue)}</div>
+          </div>
+          <div className="summary-meta">
+            <div><span className="muted small">Invested </span>{usd(data.investedValue)}</div>
+            <div><span className="muted small">Cash </span>{usd(data.cashBalance)}{' '}
+              <span className="muted small">({data.cashPct.toFixed(1)}%)</span></div>
+            <div title="Unrealized P/L on currently held positions (vs cost basis)">
+              <span className="muted small">Unrealized </span>
+              <span className={signCls(data.totalGainLoss)}>
+                {usd(data.totalGainLoss)}{unrealPct == null ? '' : ` (${pct(unrealPct)})`}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="returns" title="Account-equity change over each window (cash included)">
+          {returns.map((r) => (
+            <div className="ret" key={r.label}>
+              <div className="muted small">{r.label}</div>
+              <div className={r.dollar == null ? 'muted' : signCls(r.dollar)}>
+                {r.dollar == null ? '—' : usd(r.dollar)}
+              </div>
+              <div className={`small ${r.pct == null ? 'muted' : signCls(r.pct)}`}>
+                {r.pct == null ? '' : pct(r.pct)}
+              </div>
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {COLS.map((c, ci) => (
+                <th
+                  key={c.key}
+                  className={`sortable${ci === 0 ? ' sticky-col' : ''}`}
+                  onClick={() => toggleSort(c)}
+                  title="Click to sort"
+                >
+                  {c.label}{sort.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((h) => (
+              <tr key={h.symbol}>
+                {COLS.map((c, ci) => (
+                  <td key={c.key} className={`${ci === 0 ? 'sticky-col' : ''} ${c.cls ? c.cls(h) : ''}`}>
+                    {c.render(h)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </>
   );

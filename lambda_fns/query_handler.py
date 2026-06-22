@@ -93,6 +93,7 @@ def _get_portfolio(client) -> dict:
         "cashPct": p.cash_pct,
         "todayGainLoss": p.today_gain_loss,
         "totalGainLoss": p.total_gain_loss,
+        "periodReturns": client.get_period_returns(p.total_value),
         "holdings": [_holding(h) for h in sorted(
             p.holdings.values(), key=lambda x: x.current_value, reverse=True)],
     }

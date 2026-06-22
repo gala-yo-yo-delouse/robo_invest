@@ -56,6 +56,34 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: upp
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 16px 0; }
 .table-wrap table { margin: 0; }
 
+/* Sortable headers + frozen first column (Symbol stays put while the rest
+   scroll horizontally under it). */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);            /* opaque so scrolling cells pass underneath */
+  border-right: 1px solid var(--line);
+}
+
+/* Compact portfolio summary: value header + a grid of period returns. Designed
+   to stay under ~half the mobile viewport. */
+.summary {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 16px;
+}
+.summary-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.total-value { font-size: 26px; font-weight: 700; }
+.summary-meta { text-align: right; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.returns { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 14px; }
+.ret { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; text-align: center; }
+.ret > div:nth-child(2) { font-size: 15px; font-weight: 600; margin: 2px 0 1px; }
+
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .card, .profile {
   background: var(--panel);
@@ -179,6 +207,11 @@ input[type='number'] {
 
   /* Cards / profiles: two-up that collapses to one-up on the smallest screens. */
   .card, .profile { flex: 1 1 calc(50% - 12px); min-width: 0; width: auto; }
+
+  /* Period returns: 3-up grid so the summary stays compact on phones. */
+  .returns { grid-template-columns: repeat(3, 1fr); }
+  .total-value { font-size: 22px; }
+  .summary-meta { text-align: left; }
 }
 
 @media (max-width: 420px) {

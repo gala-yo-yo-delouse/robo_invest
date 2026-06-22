@@ -1,7 +1,7 @@
 """Alpaca API client wrapper for paper trading (alpaca-py SDK)."""
 
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -303,6 +303,73 @@ class AlpacaClient:
             holdings=holdings,
             total_value=total,
         )
+
+    def get_period_returns(self, current_equity: float | None = None) -> dict:
+        """Account-equity returns over standard look-back windows.
+
+        Pulls ~1y of daily account equity from Alpaca's portfolio-history
+        endpoint and computes, per window, ``(now - start) / start`` where
+        ``start`` is the last daily close on/before the window's start date — or
+        the earliest point available if the account is younger than the window
+        (so a fresh account shows since-inception in every window). Returns
+        ``{"1M": {"dollar": .., "pct": ..}, "6M": .., "YTD": .., "12M": ..}``;
+        windows that can't be computed are omitted. NOTE: raw equity change, so
+        deposits/withdrawals inside a window shift it — acceptable for a
+        buy-and-hold account.
+        """
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        out: dict = {}
+        try:
+            hist = self.trading.get_portfolio_history(
+                GetPortfolioHistoryRequest(period="1A", timeframe="1D")
+            )
+            ts = list(getattr(hist, "timestamp", None) or [])
+            eq = list(getattr(hist, "equity", None) or [])
+        except Exception as e:
+            print(f"  Warning: portfolio history failed: {e}")
+            return out
+
+        # (date, equity) pairs, dropping gaps where Alpaca reports null/zero.
+        series = [
+            (datetime.fromtimestamp(int(t), tz=timezone.utc).date(), float(e))
+            for t, e in zip(ts, eq)
+            if e is not None and float(e) > 0
+        ]
+        if not series:
+            return out
+
+        now_eq = float(current_equity) if current_equity else series[-1][1]
+        today = datetime.now(timezone.utc).date()
+
+        def equity_on_or_before(target: date) -> float:
+            chosen = None
+            for d, v in series:
+                if d <= target:
+                    chosen = v
+                else:
+                    break
+            return chosen if chosen is not None else series[0][1]
+
+        windows = {
+            "1M": today - timedelta(days=30),
+            "6M": today - timedelta(days=182),
+            "12M": today - timedelta(days=365),
+            "YTD": date(today.year, 1, 1) - timedelta(days=1),  # last close of prior year
+        }
+        for label, target in windows.items():
+            base = equity_on_or_before(target)
+            if not base or base <= 0:
+                continue
+            dollar = now_eq - base
+            out[label] = {"dollar": round(dollar, 2), "pct": round(dollar / base * 100, 2)}
+
+        # Since-inception: now vs the earliest equity point on record.
+        inception = series[0][1]
+        if inception > 0:
+            d = now_eq - inception
+            out["ALL"] = {"dollar": round(d, 2), "pct": round(d / inception * 100, 2)}
+        return out
 
     def get_positions(self) -> list[dict]:
         """Get all current positions from Alpaca."""

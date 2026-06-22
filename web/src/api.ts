@@ -30,6 +30,8 @@ export interface Portfolio {
   cashPct: number;
   todayGainLoss: number;
   totalGainLoss: number;
+  // Account-equity returns per window (1M/6M/YTD/12M); absent windows omitted.
+  periodReturns?: Record<string, { dollar: number; pct: number }>;
   holdings: Holding[];
 }
 
