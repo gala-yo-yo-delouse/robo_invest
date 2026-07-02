@@ -304,20 +304,48 @@ class AlpacaClient:
             total_value=total,
         )
 
-    def get_period_returns(self, current_equity: float | None = None) -> dict:
-        """Account-equity returns over standard look-back windows.
+    def _get_account_activities(self, activity_types: str, page_size: int = 100) -> list[dict]:
+        """All account activities of the given comma-separated ``activity_types``,
+        paginated to exhaustion. The Trading API's ``/account/activities`` isn't
+        wrapped by ``TradingClient`` in alpaca-py, so we call the low-level GET and
+        page with ``page_token`` = the last row's id. Returns [] on any failure."""
+        out: list[dict] = []
+        token = None
+        try:
+            while True:
+                params = {"activity_types": activity_types, "page_size": page_size}
+                if token:
+                    params["page_token"] = token
+                page = self.trading.get("/account/activities", params)
+                if not page:
+                    break
+                out.extend(page)
+                if len(page) < page_size:
+                    break
+                token = page[-1]["id"]
+        except Exception as e:
+            print(f"  Warning: account activities ({activity_types}) failed: {e}")
+        return out
 
-        Pulls ~1y of daily account equity from Alpaca's portfolio-history
-        endpoint and computes, per window, ``(now - start) / start`` where
-        ``start`` is the last daily close on/before the window's start date — or
-        the earliest point available if the account is younger than the window
-        (so a fresh account shows since-inception in every window). Returns
-        ``{"1M": {"dollar": .., "pct": ..}, "6M": .., "YTD": .., "12M": ..}``;
-        windows that can't be computed are omitted. NOTE: raw equity change, so
-        deposits/withdrawals inside a window shift it — acceptable for a
-        buy-and-hold account.
+    def get_period_returns(self, current_equity: float | None = None) -> dict:
+        """Deposit-adjusted returns per look-back window, split realized/unrealized.
+
+        Combines Alpaca's daily equity curve (portfolio-history) with account
+        activities (fills, cash transfers, dividends/interest, fees) so that:
+
+        - the **%** is Modified Dietz — external deposits/withdrawals are removed
+          from the numerator and time-weighted out of the denominator (this is
+          what fixes the old "deposit shows up as +100% return" bug);
+        - the **$** splits into ``realized`` (sell P&L + dividends + interest − fees)
+          and ``unrealized`` (the residual: appreciation still held).
+
+        Returns ``{"1M": {realized, unrealized, total, pct, realizedPct,
+        unrealizedPct}, "6M": .., "12M": .., "YTD": .., "ALL": ..}``; windows that
+        can't be computed are omitted. Math lives in ``src/returns.py``.
         """
         from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+        from . import returns as R
 
         out: dict = {}
         try:
@@ -351,24 +379,68 @@ class AlpacaClient:
                     break
             return chosen if chosen is not None else series[0][1]
 
+        # ── activities → dated events for the accounting identity ──────────
+        def _d(a: dict) -> date | None:
+            raw = a.get("date") or a.get("transaction_time")
+            return datetime.fromisoformat(str(raw)[:10]).date() if raw else None
+
+        # Fills: realized sell P&L via running average cost (needs full history).
+        fills = []
+        for a in self._get_account_activities("FILL"):
+            d = _d(a)
+            if d is None:
+                continue
+            fills.append({
+                "date": d,
+                "symbol": a.get("symbol"),
+                "side": "sell" if str(a.get("side", "")).startswith("sell") else "buy",
+                "qty": float(a.get("qty") or 0),
+                "price": float(a.get("price") or 0),
+            })
+        fills.sort(key=lambda f: f["date"])
+        realized_events = R.realized_pnl_from_fills(fills)
+
+        # External cash transfers (+deposit / −withdrawal) — excluded from return.
+        # Absorb the opening deposit into the baseline equity so it isn't counted
+        # both in begin_equity and as a flow (Alpaca dates the two a few days apart).
+        transfers = [
+            (_d(a), float(a.get("net_amount") or 0))
+            for a in self._get_account_activities("CSD,CSW,JNLC,TRANS,PTC")
+        ]
+        transfers = [(d, amt) for d, amt in transfers if d is not None]
+        transfers = R.external_flows(transfers, series[0][1])
+
+        # Dividends + interest (+) and fees (−) — realized income booked to cash.
+        income_events = [
+            (_d(a), float(a.get("net_amount") or 0))
+            for a in self._get_account_activities(
+                "DIV,DIVCGL,DIVCGS,DIVNRA,DIVROC,DIVTXEX,INT,FEE,CFEE")
+        ]
+        income_events = [(d, amt) for d, amt in income_events if d is not None]
+
+        # ── windows ───────────────────────────────────────────────────────
+        first_date = series[0][0]
         windows = {
             "1M": today - timedelta(days=30),
             "6M": today - timedelta(days=182),
             "12M": today - timedelta(days=365),
             "YTD": date(today.year, 1, 1) - timedelta(days=1),  # last close of prior year
+            "ALL": first_date,
         }
         for label, target in windows.items():
-            base = equity_on_or_before(target)
-            if not base or base <= 0:
-                continue
-            dollar = now_eq - base
-            out[label] = {"dollar": round(dollar, 2), "pct": round(dollar / base * 100, 2)}
-
-        # Since-inception: now vs the earliest equity point on record.
-        inception = series[0][1]
-        if inception > 0:
-            d = now_eq - inception
-            out["ALL"] = {"dollar": round(d, 2), "pct": round(d / inception * 100, 2)}
+            # Account younger than the window ⇒ measure since inception.
+            base_date = target if target >= first_date else first_date
+            result = R.compute_window(
+                base_date=base_date,
+                end_date=today,
+                begin_equity=equity_on_or_before(target),
+                end_equity=now_eq,
+                transfers=transfers,
+                realized_events=realized_events,
+                income_events=income_events,
+            )
+            if result is not None:
+                out[label] = result
         return out
 
     def get_positions(self) -> list[dict]:

@@ -83,6 +83,7 @@ th.sortable:hover { color: var(--text); }
 .returns { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 14px; }
 .ret { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; text-align: center; }
 .ret > div:nth-child(2) { font-size: 15px; font-weight: 600; margin: 2px 0 1px; }
+.ret-split { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
 
 .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .card, .profile {

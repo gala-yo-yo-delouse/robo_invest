@@ -95,14 +95,21 @@ function PortfolioView() {
   const totalCost = data.holdings.reduce((s, h) => s + h.costBasisTotal, 0);
   const prevTotal = data.totalValue - data.todayGainLoss;
   const unrealPct = totalCost > 0 ? (data.totalGainLoss / totalCost) * 100 : null;
-  // Account-equity change per window — all the same measure (cash included).
-  const returns: { label: string; dollar: number | null; pct: number | null }[] = [
-    { label: 'Today', dollar: data.todayGainLoss, pct: prevTotal > 0 ? (data.todayGainLoss / prevTotal) * 100 : null },
-    { label: '1M', dollar: pr['1M']?.dollar ?? null, pct: pr['1M']?.pct ?? null },
-    { label: '6M', dollar: pr['6M']?.dollar ?? null, pct: pr['6M']?.pct ?? null },
-    { label: 'YTD', dollar: pr['YTD']?.dollar ?? null, pct: pr['YTD']?.pct ?? null },
-    { label: '12M', dollar: pr['12M']?.dollar ?? null, pct: pr['12M']?.pct ?? null },
-    { label: 'All', dollar: pr['ALL']?.dollar ?? null, pct: pr['ALL']?.pct ?? null },
+  // Per window: Modified-Dietz % (deposits removed) + realized/unrealized $ split.
+  // Today is intraday P/L (a different, position-level measure), shown as one figure.
+  type Ret = {
+    label: string; pct: number | null;
+    realized?: number; unrealized?: number; today?: number | null;
+  };
+  const win = (label: string, key: string): Ret => {
+    const w = pr[key];
+    return w
+      ? { label, pct: w.pct, realized: w.realized, unrealized: w.unrealized }
+      : { label, pct: null };
+  };
+  const returns: Ret[] = [
+    { label: 'Today', pct: prevTotal > 0 ? (data.todayGainLoss / prevTotal) * 100 : null, today: data.todayGainLoss },
+    win('1M', '1M'), win('6M', '6M'), win('YTD', 'YTD'), win('12M', '12M'), win('All', 'ALL'),
   ];
 
   const col = COLS.find((c) => c.key === sort.key) ?? COLS[0];
@@ -137,16 +144,25 @@ function PortfolioView() {
             </div>
           </div>
         </div>
-        <div className="returns" title="Account-equity change over each window (cash included)">
+        <div className="returns" title="Return per window, excluding deposits/withdrawals. % is Modified Dietz (time-weighted). Realized = booked sell P/L + dividends − fees; Unrealized = appreciation still held.">
           {returns.map((r) => (
             <div className="ret" key={r.label}>
               <div className="muted small">{r.label}</div>
-              <div className={r.dollar == null ? 'muted' : signCls(r.dollar)}>
-                {r.dollar == null ? '—' : usd(r.dollar)}
+              <div className={r.pct == null ? 'muted' : signCls(r.pct)}>
+                {r.pct == null ? '—' : pct(r.pct)}
               </div>
-              <div className={`small ${r.pct == null ? 'muted' : signCls(r.pct)}`}>
-                {r.pct == null ? '' : pct(r.pct)}
-              </div>
+              {r.today !== undefined ? (
+                <div className={`small ${signCls(r.today ?? 0)}`}>{usd(r.today ?? 0)}</div>
+              ) : r.realized == null ? (
+                <div className="ret-split small muted">—</div>
+              ) : (
+                <div className="ret-split small">
+                  <div><span className="muted">R </span>
+                    <span className={signCls(r.realized)}>{usd(r.realized)}</span></div>
+                  <div><span className="muted">U </span>
+                    <span className={signCls(r.unrealized ?? 0)}>{usd(r.unrealized ?? 0)}</span></div>
+                </div>
+              )}
             </div>
           ))}
         </div>
